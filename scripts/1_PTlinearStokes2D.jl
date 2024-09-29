@@ -44,6 +44,7 @@ function update_dV!(dV, R, Pt, τ, ρg, dx, dy, damp)
             dV.y[i, j] = damp.y * dV.y[i, j] + R.y[i, j]
         end
     end
+    return nothing
 end
 
 
@@ -79,17 +80,17 @@ function bc_y!(f)
 end
 
 
-function linearStokes2D()
+function linearStokes2D(η_ratio=0.1)
     Lx = Ly = 10.
     R_in  = 1.
-    η_in  = 0.01
     η_out = 1.
+    η_in  = η_ratio * η_out
     ρg_in = 1.
 
     nx = ny = 127
-    max_iter = 10000
+    max_iter = 100000
     max_err  = 1e-6
-    ncheck = 100
+    ncheck = 1000
 
     dx, dy = Lx / nx, Ly / ny
     xs = LinRange(-0.5Lx + 0.5dx, 0.5Lx - 0.5dx, nx)
@@ -105,13 +106,17 @@ function linearStokes2D()
     R    = (x=zeros(nx-1, ny-2), y=zeros(nx-2, ny-1))
     τ    = (xx=zeros(nx, ny), xy=zeros(nx-1, ny-1), yy=zeros(nx, ny))
     κΔθ   = zeros(nx, ny)
-    Δθ_ρx = zeros(nx-1, ny-2)
-    Δθ_ρy = zeros(nx-2, ny-1)
 
     # numerical parameters according to the Stokes2D miniapp in ParallelStencil.jl
-    Δθ_ρx .= min(dx, dy)^2 / 4.1 * 2 ./ (η[1:end-1, 2:end-1] + η[2:end, 2:end-1])
-    Δθ_ρy .= min(dx, dy)^2 / 4.1 * 2 ./ (η[2:end-1, 1:end-1] + η[2:end-1, 2:end])
-    κΔθ   .= 0.25 * 4.1 / max(nx, ny) .* η 
+    #  - change prefactor 4.1 to 5.1
+    #  - replace average by maximum over domain of dependence
+    preθv = min(dx, dy)^2 / 5.1
+    preθp = 0.25 * 5.1 / max(nx, ny)
+    Δθ_ρx = [preθv / max(η[i, j], η[i+1, j], η[i, j+1], η[i+1, j+1], η[i, j+2], η[i+1, j+2])
+             for i=1:nx-1, j=1:ny-2]
+    Δθ_ρy = [preθv / max(η[i, j], η[i+1, j], η[i+2, j], η[i, j+1], η[i+1, j+1], η[i+2, j+1])
+             for i=1:nx-2, j=1:ny-1]
+    κΔθ   = preθp * η
     damp = (x=1-4/nx, y=1-4/ny)
 
     # visualisation
@@ -157,4 +162,4 @@ function linearStokes2D()
 
 end
 
-linearStokes2D()
+linearStokes2D(1e3)
