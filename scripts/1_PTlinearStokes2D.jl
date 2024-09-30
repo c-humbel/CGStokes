@@ -88,9 +88,9 @@ function linearStokes2D(η_ratio=0.1)
     ρg_in = 1.
 
     nx = ny = 127
-    max_iter = 100000
+    max_iter = 1000000
     max_err  = 1e-6
-    ncheck = 1000
+    ncheck = 5000
 
     dx, dy = Lx / nx, Ly / ny
     xs = LinRange(-0.5Lx + 0.5dx, 0.5Lx - 0.5dx, nx)
@@ -105,11 +105,11 @@ function linearStokes2D(η_ratio=0.1)
     dV   = (x=zeros(nx-1, ny-2), y=zeros(nx-2, ny-1))
     R    = (x=zeros(nx-1, ny-2), y=zeros(nx-2, ny-1))
     τ    = (xx=zeros(nx, ny), xy=zeros(nx-1, ny-1), yy=zeros(nx, ny))
-    κΔθ   = zeros(nx, ny)
 
     # numerical parameters according to the Stokes2D miniapp in ParallelStencil.jl
     #  - change prefactor 4.1 to 5.1
-    #  - replace average by maximum over domain of dependence
+    #  - replace viscosity average by maximum in domain of dependence
+    #  - for pressure, use viscosity minimum in domain of dependence
     preθv = min(dx, dy)^2 / 5.1
     preθp = 0.25 * 5.1 / max(nx, ny)
     Δθ_ρx = [preθv / max(η[i, j], η[i+1, j], η[i, j+1], η[i+1, j+1], η[i, j+2], η[i+1, j+2])
@@ -117,6 +117,12 @@ function linearStokes2D(η_ratio=0.1)
     Δθ_ρy = [preθv / max(η[i, j], η[i+1, j], η[i+2, j], η[i, j+1], η[i+1, j+1], η[i+2, j+1])
              for i=1:nx-2, j=1:ny-1]
     κΔθ   = preθp * η
+    for j=2:ny-1
+        for i=2:nx-1
+            κΔθ[i, j] = preθp * min(η[i, j], η[i-1, j], η[i+1, j], η[i, j-1], η[i, j+1])
+        end
+    end
+    
     damp = (x=1-4/nx, y=1-4/ny)
 
     # visualisation
@@ -162,4 +168,4 @@ function linearStokes2D(η_ratio=0.1)
 
 end
 
-linearStokes2D(1e3)
+linearStokes2D(1e-9)
