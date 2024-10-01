@@ -80,17 +80,14 @@ function bc_y!(f)
 end
 
 
-function linearStokes2D(η_ratio=0.1)
+function linearStokes2D(η_ratio=0.1; max_iter=100000, ncheck=2000, max_err=1e-6, n=127)
     Lx = Ly = 10.
     R_in  = 1.
     η_out = 1.
     η_in  = η_ratio * η_out
     ρg_in = 1.
 
-    nx = ny = 127
-    max_iter = 1000000
-    max_err  = 1e-6
-    ncheck = 5000
+    nx = ny = n
 
     dx, dy = Lx / nx, Ly / ny
     xs = LinRange(-0.5Lx + 0.5dx, 0.5Lx - 0.5dx, nx)
@@ -126,17 +123,18 @@ function linearStokes2D(η_ratio=0.1)
     damp = (x=1-4/nx, y=1-4/ny)
 
     # visualisation
+    errs = zeros(fld(max_iter, ncheck))
+
     fig = Figure()
     axs = (Pt=Axis(fig[1,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Pressure"),
-           η=Axis(fig[1,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Viscosity"),
+           err=Axis(fig[1,2][1,1], xlabel="Iterations", title="Residual"),
            Vy=Axis(fig[2,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity"),
-           Ry=Axis(fig[2,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity Residual"))
+           Ry=Axis(fig[2,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity Residual (log)"))
     plt = (Pt=image!(axs.Pt, (xs[1], xs[end]), (ys[1], ys[end]), Pt, colormap=:inferno),
-           η=image!(axs.η, (xs[1], xs[end]), (ys[1], ys[end]), η, colormap=:inferno),
+           err=lines!(axs.err, 1:ncheck:max_iter, errs),
            Vy=image!(axs.Vy, (xs[1], xs[end]), (ys[1]-dy/2, ys[end]+dy/2), V.y, colormap=:inferno),
            Ry=image!(axs.Ry, (xs[1]+dx, xs[end]-dx), (ys[1]+dy/2, ys[end]-dy/2), R.y, colormap=:inferno))
     Colorbar(fig[1, 1][1, 2], plt.Pt)
-    Colorbar(fig[1, 2][1, 2], plt.η)
     Colorbar(fig[2, 1][1, 2], plt.Vy)
     Colorbar(fig[2, 2][1, 2], plt.Ry)
 
@@ -153,6 +151,7 @@ function linearStokes2D(η_ratio=0.1)
             err = max(norm(divV, 1)/length(divV), norm(R.x, 1)/length(R.x), norm(R.y, 1)/length(R.y))
             
             println("iteration ", it, ": err = ", err)
+            errs[fld(it, ncheck)] = err
             
         end
         it += 1
@@ -160,6 +159,8 @@ function linearStokes2D(η_ratio=0.1)
 
     println("total number of iterations: ", it)
     plt.Pt[3] = Pt
+    plt.err[1] = ncheck:ncheck:it-1
+    plt.err[2] = errs[errs .> 0]
     plt.Vy[3] = V.y
     plt.Ry[3] = log10.(abs.(R.y))
     display(fig)
@@ -168,4 +169,4 @@ function linearStokes2D(η_ratio=0.1)
 
 end
 
-linearStokes2D(1e-9)
+linearStokes2D(1e-6; max_iter=10000)
