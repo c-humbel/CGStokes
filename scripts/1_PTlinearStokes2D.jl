@@ -104,11 +104,10 @@ function linearStokes2D(η_ratio=0.1; max_iter=100000, ncheck=2000, max_err=1e-6
     τ    = (xx=zeros(nx, ny), xy=zeros(nx-1, ny-1), yy=zeros(nx, ny))
 
     # numerical parameters according to the Stokes2D miniapp in ParallelStencil.jl
-    #  - change prefactor 4.1 to 5.1
     #  - replace viscosity average by maximum in domain of dependence
     #  - for pressure, use viscosity minimum in domain of dependence
-    preθv = min(dx, dy)^2 / 5.1
-    preθp = 0.25 * 5.1 / max(nx, ny)
+    preθv = min(dx, dy)^2 / 4.1
+    preθp = 0.25 * 4.1 / max(nx, ny)
     Δθ_ρx = [preθv / max(η[i, j], η[i+1, j], η[i, j+1], η[i+1, j+1], η[i, j+2], η[i+1, j+2])
              for i=1:nx-1, j=1:ny-2]
     Δθ_ρy = [preθv / max(η[i, j], η[i+1, j], η[i+2, j], η[i, j+1], η[i+1, j+1], η[i+2, j+1])
@@ -164,12 +163,14 @@ function linearStokes2D(η_ratio=0.1; max_iter=100000, ncheck=2000, max_err=1e-6
         scatterlines!(ax, ncheck:ncheck:it-1, log10.(errs[errs .> 0]))
     end
 
-    display(fig)
+    
     if savefig
-        save("1_overview_$(η_ratio)_$(n).png", fig)
+        save("1_output_$(η_ratio)_$(n).png", fig)
+    else
+        display(fig)
     end
     return nothing
 
 end
 
-linearStokes2D(1e-9; max_iter=1000000, ncheck=10000, savefig=true, plot_res=false)
+linearStokes2D(1e-1; max_iter=20000, ncheck=200, savefig=false, plot_res=true)
