@@ -80,7 +80,7 @@ function bc_y!(f)
 end
 
 
-function linearStokes2D(η_ratio=0.1; max_iter=100000, ncheck=2000, max_err=1e-6, n=127)
+function linearStokes2D(η_ratio=0.1; max_iter=100000, ncheck=2000, max_err=1e-6, n=127, savefig=false, plot_res=true)
     Lx = Ly = 10.
     R_in  = 1.
     η_out = 1.
@@ -125,19 +125,6 @@ function linearStokes2D(η_ratio=0.1; max_iter=100000, ncheck=2000, max_err=1e-6
     # visualisation
     errs = zeros(fld(max_iter, ncheck))
 
-    fig = Figure()
-    axs = (Pt=Axis(fig[1,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Pressure"),
-           err=Axis(fig[1,2][1,1], xlabel="Iterations", title="Residual"),
-           Vy=Axis(fig[2,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity"),
-           Ry=Axis(fig[2,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity Residual (log)"))
-    plt = (Pt=image!(axs.Pt, (xs[1], xs[end]), (ys[1], ys[end]), Pt, colormap=:inferno),
-           err=lines!(axs.err, 1:ncheck:max_iter, errs),
-           Vy=image!(axs.Vy, (xs[1], xs[end]), (ys[1]-dy/2, ys[end]+dy/2), V.y, colormap=:inferno),
-           Ry=image!(axs.Ry, (xs[1]+dx, xs[end]-dx), (ys[1]+dy/2, ys[end]-dy/2), R.y, colormap=:inferno))
-    Colorbar(fig[1, 1][1, 2], plt.Pt)
-    Colorbar(fig[2, 1][1, 2], plt.Vy)
-    Colorbar(fig[2, 2][1, 2], plt.Ry)
-
     # loop
     err = 2 * max_err
     it = 1
@@ -158,15 +145,31 @@ function linearStokes2D(η_ratio=0.1; max_iter=100000, ncheck=2000, max_err=1e-6
     end
 
     println("total number of iterations: ", it)
-    plt.Pt[3] = Pt
-    plt.err[1] = ncheck:ncheck:it-1
-    plt.err[2] = errs[errs .> 0]
-    plt.Vy[3] = V.y
-    plt.Ry[3] = log10.(abs.(R.y))
-    display(fig)
 
+    fig = Figure()
+    if plot_res
+        axs = (Pt=Axis(fig[1,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Pressure"),
+            err=Axis(fig[1,2][1,1], xlabel="Iterations", title="Residual (log)"),
+            Vy=Axis(fig[2,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity"),
+            Ry=Axis(fig[2,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity Residual (log)"))
+        plt = (Pt=image!(axs.Pt, (xs[1], xs[end]), (ys[1], ys[end]), Pt, colormap=:inferno),
+            err=lines!(axs.err, ncheck:ncheck:it-1, log10.(errs[errs .> 0])),
+            Vy=image!(axs.Vy, (xs[1], xs[end]), (ys[1]-dy/2, ys[end]+dy/2), V.y, colormap=:inferno),
+            Ry=image!(axs.Ry, (xs[1]+dx, xs[end]-dx), (ys[1]+dy/2, ys[end]-dy/2), log10.(abs.(R.y)), colormap=:inferno))
+        Colorbar(fig[1, 1][1, 2], plt.Pt)
+        Colorbar(fig[2, 1][1, 2], plt.Vy)
+        Colorbar(fig[2, 2][1, 2], plt.Ry)
+    else
+        ax = Axis(fig[1,1], xlabel="Iterations", ylabel="log₁₀(Residual)", title="η ratio=$η_ratio")
+        scatterlines!(ax, ncheck:ncheck:it-1, log10.(errs[errs .> 0]))
+    end
+
+    display(fig)
+    if savefig
+        save("1_overview_$(η_ratio)_$(n).png", fig)
+    end
     return nothing
 
 end
 
-linearStokes2D(1e-6; max_iter=10000)
+linearStokes2D(1e-9; max_iter=1000000, ncheck=10000, savefig=true, plot_res=false)
