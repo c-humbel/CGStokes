@@ -238,12 +238,16 @@ end
 
 
 
-function create_convergence_plot(errs, ncheck, η_ratio; savefig=false)
+function create_convergence_plot(errs_in, errs_out, ncheck, ninner, η_ratio; savefig=false)
     fig = Figure()
-    ax = Axis(fig[1,1], xlabel="Iterations", ylabel="log₁₀(Residual)", title="η ratio=$η_ratio")
-    scatterlines!(ax, ncheck .* (1:length(errs)), log10.(errs))
+    ax = Axis(fig[1,1], xlabel="Iterations", ylabel="log₁₀(Mean Abs. Residual)", title="η ratio=$η_ratio")
+    iters_out = [ninner * i for i=1:length(errs_out)]
+    iters_out[end] = ncheck * length(errs_in)
+    lines!(ax, ncheck .* (1:length(errs_in)), log10.(errs_in), color=:red, label="Velocity")
+    scatter!(ax, iters_out, log10.(errs_out), color=:blue, label="Pressure")
+    axislegend(ax, position=:rt)
     if savefig
-        save("1_convergence_$(η_ratio)_$(n).png", fig)
+        save("1_convergence_$(η_ratio)_$(ninner).png", fig)
     else
         display(fig)
     end
@@ -252,10 +256,12 @@ function create_convergence_plot(errs, ncheck, η_ratio; savefig=false)
 end
 
 eta = 0.1
-ninner=500
-nouter=100
-ncheck=50
+ninner=10000
+nouter=10
+ncheck=100
 
 outfields = linearStokes2D(eta; niter_in=ninner, niter_out=nouter, ncheck=ncheck)
 
-create_output_plot(outfields...; ncheck=ncheck, ninner=ninner, η_ratio=eta, savefig=true)
+#create_output_plot(outfields...; ncheck=ncheck, ninner=ninner, η_ratio=eta, savefig=true)
+
+create_convergence_plot(outfields[4:5]..., ncheck, ninner, eta; savefig=false)
