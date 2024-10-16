@@ -67,10 +67,10 @@ The main reference for this step is: *Numerical solution of saddle point problem
 
 We consider the same setting as in step 1. If the Stokes equations are discretised using FD, they can be formulated as linear system of equations:
 
-$$
+```math
 \begin{bmatrix}
-A & G \\
-G^T & O
+A & -G \\
+-G^T & O
 \end{bmatrix}
 \begin{bmatrix}
 v \\
@@ -81,23 +81,23 @@ p
 f \\ 
 0
 \end{bmatrix}
-$$
+```
 
 Where $v$ and $p$ are flattened velocity and pressure vectors. $G / G^T$ are discretised gradient and divergence, and $A v$ represents $2\eta \left( \frac{1}{2} \left( \nabla V + \nabla V^T \right) \right)$.
 
 This system can be solved using an augmented Lagrangian:
 
 $$
-\mathcal{L}(v, p) = \frac{1}{2} v^T A v - f^T v + v^T G p + \frac{\gamma}{2} \left|\left| G^T v \right|\right|_2^2
+\mathcal{L}(v, p) = \frac{1}{2} v^T A v - f^T v - v^T G p + \frac{\gamma}{2} \left|\left| G^T v \right|\right|_2^2
 $$
 
 This Lagrangian can be minimised iteratively, using some initial guess for $p$:
 
 > while not converged, do
 >
->> solve $(A + \gamma G G^T) v = f - G p$
+>> solve $(A + \gamma G G^T) v = f + G p$
 >>
->> set $p = p + \gamma G^T v$
+>> set $p = p - \gamma G^T v$
 
 Physically, the first step can be interpreted as solving a compressible Stokes equation for fixed pressure (the term $\gamma G G^T v$ represents compressibility).
 
