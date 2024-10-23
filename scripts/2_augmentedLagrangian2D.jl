@@ -3,31 +3,37 @@ using LinearAlgebra
 using Enzyme
 
 
-function compute_P!(P, divV, V, dx, dy, γ)
-    nx, ny = size(P)
-    # compute pressure
+function compute_divV!(divV, V, dx, dy)
+    nx, ny = size(divV)
     for j = 1:ny
         for i = 1:nx
             dVx = (V.x[i+1, j] - V.x[i, j]) / dx
             dVy = (V.y[i, j+1] - V.y[i, j]) / dy
             divV[i, j] = dVx + dVy
-            P[i, j] -= γ * divV[i, j]
         end
     end
     return nothing
 end
 
 
-function compute_R!(R, P, V, ρg, η, dx, dy, γ)
+function compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
     nx, ny = size(P)
     # compute the residual at cell interfaces
+
+    # pressure update
+    for j = 1:ny
+        for i = 1:nx
+            ∇V = (V.x[i+1, j] - V.x[i, j]) / dx + (V.y[i, j+1] - V.y[i, j]) / dy
+            P[i, j] = P_old[i, j] - γ * ∇V
+        end
+    end
 
     # in horizontal (x) direction
     for j = 1:ny-2
         for i = 1:nx-1
             # stress at horizontally adjacent cell centers
-            τxx_r = (2 * η[i+1, j+1] + γ) * (V.x[i+2, j+1] - V.x[i+1, j+1]) / dx + γ * (V.y[i+1, j+2] - V.y[i+1, j+1]) / dy
-            τxx_l = (2 * η[i  , j+1] + γ) * (V.x[i+1, j+1] - V.x[i  , j+1]) / dx + γ * (V.y[i  , j+2] - V.y[i  , j+1]) / dy
+            τxx_r = 2 * η[i+1, j+1] * (V.x[i+2, j+1] - V.x[i+1, j+1]) / dx
+            τxx_l = 2 * η[i  , j+1] * (V.x[i+1, j+1] - V.x[i  , j+1]) / dx
             # viscosity at vertically adjacent cell corners
             η_t   = 0.25 * (η[i, j+1] + η[i+1, j+1] + η[i, j+2] + η[i+1, j+2])
             η_b   = 0.25 * (η[i, j  ] + η[i+1, j  ] + η[i, j+1] + η[i+1, j+1])
@@ -46,8 +52,8 @@ function compute_R!(R, P, V, ρg, η, dx, dy, γ)
     # residual in y direction
     for j = 1:ny-1
         for i = 1:nx-2
-            τyy_t = (2 * η[i+1, j+1] + γ) * (V.y[i+1, j+2] - V.y[i+1, j+1]) / dy + γ * (V.x[i+2, j+1] - V.x[i+1, j+1]) / dx
-            τyy_b = (2 * η[i+1, j  ] + γ) * (V.y[i+1, j+1] - V.y[i+1, j  ]) / dy + γ * (V.x[i+2, j  ] - V.x[i+1, j  ]) / dx
+            τyy_t = 2 * η[i+1, j+1] * (V.y[i+1, j+2] - V.y[i+1, j+1]) / dy
+            τyy_b = 2 * η[i+1, j  ] * (V.y[i+1, j+1] - V.y[i+1, j  ]) / dy
 
             η_r   = 0.25 * (η[i+1, j  ] + η[i+2, j  ] + η[i+1, j+1] + η[i+2, j+1])
             η_l   = 0.25 * (η[i  , j  ] + η[i+1, j  ] + η[i  , j+1] + η[i+1, j+1])
@@ -89,10 +95,10 @@ function update_D!(D, R, Minv, β)
 end
 
 
-function compute_α(R, Ad, P, V, D, ρg, η, rMr, dx, dy, γ)
+function compute_α(R, Ad, P, P̄, P_old, V, D, ρg, η, rMr, dx, dy, γ)
     # compute Jacobian-vector product Jac(R) * D using Enzyme
     # result is stored in Ad
-    autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Ad), Const(P), Duplicated(V, D), Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
+    autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Ad), Duplicated(P, P̄), Const(P_old), Duplicated(V, D), Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
     # compute α = -dot(R, M*R) / dot(D, A*D)
     return  rMr / (dot(D.x[2:end-1, 2:end-1], Ad.x) + dot(D.y[2:end-1, 2:end-1], Ad.y))
 end
@@ -147,21 +153,24 @@ function linearStokes2D(η_ratio=0.1; niter_in=1000, niter_out=1000, ncheck=2000
     η      = [x^2 + y^2 < R_in^2 ? η_in  : η_out for x=xs, y=ys]
     ρg     = [x^2 + y^2 < R_in^2 ? ρg_in : 0.    for x=xs, y=ys]
     P      = zeros(nx, ny)
+    P_old  = zeros(nx, ny)
+    P̄      = zeros(nx, ny)
     divV   = zeros(nx, ny)
     V      = (x =zeros(nx+1, ny  ), y =zeros(nx  , ny+1))
     D      = (x =zeros(nx+1, ny  ), y =zeros(nx  , ny+1))  # search direction of CG, outer cells are zero
     R      = (x =zeros(nx-1, ny-2), y =zeros(nx-2, ny-1))  # Residuals of velocity PDE
     Ad     = (x =zeros(nx-1, ny-2), y =zeros(nx-2, ny-1))  # Jacobian of compute_R wrt. V, multiplied by search vector D
+    
+    # Coefficient of augmented Lagrangian
+    γ = inv(maximum(η))
 
     # preconditioner
     preθv = min(dx, dy)^2 / 4.1
-    Minv = (x=[preθv / max(η[i, j], η[i+1, j], η[i, j+1], η[i+1, j+1], η[i, j+2], η[i+1, j+2])
+    Minv = (x=[preθv / (max(η[i, j], η[i+1, j], η[i, j+1], η[i+1, j+1], η[i, j+2], η[i+1, j+2]) + γ)
                 for i=1:nx-1, j=1:ny-2],
-            y=[preθv / max(η[i, j], η[i+1, j], η[i+2, j], η[i, j+1], η[i+1, j+1], η[i+2, j+1])
+            y=[preθv / (max(η[i, j], η[i+1, j], η[i+2, j], η[i, j+1], η[i+1, j+1], η[i+2, j+1]) + γ)
                 for i=1:nx-2, j=1:ny-1])
 
-    # Coefficient of augmented Lagrangian
-    γ = inv(maximum(η))
     
     # visualisation
     errs_in = []
@@ -175,16 +184,17 @@ function linearStokes2D(η_ratio=0.1; niter_in=1000, niter_out=1000, ncheck=2000
         it_in = 1
         # inner loop, Conjugate Gradient
         # iteration zero
-        compute_R!(R, P, V, ρg, η, dx, dy, γ)
+        P_old .= P
+        compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
         D.x[2:end-1, 2:end-1] .= Minv.x .* R.x
         D.y[2:end-1, 2:end-1] .= Minv.y .* R.y
         rMr = dot(R.x, Minv.x .* R.x) + dot(R.y, Minv.y .* R.y)
         while it_in <= niter_in && err_in > max_err
-            α = compute_α(R, Ad, P, V, D, ρg, η, rMr, dx, dy, γ)
+            α = compute_α(R, Ad, P, P̄, P_old, V, D, ρg, η, rMr, dx, dy, γ)
             update_V!(V, D, α)
             neumann_bc_y!(V.x)
             neumann_bc_x!(V.y)
-            compute_R!(R, P, V, ρg, η, dx, dy, γ)
+            compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
             β, rMr = compute_β_rMr(rMr, R, Minv)
             update_D!(D, R, Minv, β)
 
@@ -195,7 +205,7 @@ function linearStokes2D(η_ratio=0.1; niter_in=1000, niter_out=1000, ncheck=2000
             end
             it_in += 1
         end
-        compute_P!(P, divV, V, dx, dy, γ)
+        compute_divV!(divV, V, dx, dy)
         err_out = norm(divV, 1) / length(divV)
         push!(errs_out, err_out)
         println(it_out , " outer iterations: error = ", err_out)
