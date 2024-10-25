@@ -76,13 +76,18 @@ function compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
 
     # velocities parallel to wall should have no gradient in the wall normal direction
     for i = 2:nx
-        R.x[i, 1  ] = -(V.x[i, 2    ] - V.x[i, 1  ]) / dy
-        R.x[i, end] = -(V.x[i, end-1] - V.x[i, end]) / dy
+        # multiply by viscosity / dy to get symmetric matrix entries (has to match with inner points)
+        η_t = 0.25 * (η[i-1, 1  ] + η[i, 1  ] + η[i-1, 2    ] + η[i, 2    ])
+        η_b = 0.25 * (η[i-1, end] + η[i, end] + η[i-1, end-1] + η[i, end-1])
+        R.x[i, 1  ] = -η_t * (V.x[i, 2    ] - V.x[i, 1  ]) / dy^2
+        R.x[i, end] = -η_b * (V.x[i, end-1] - V.x[i, end]) / dy^2
     end
 
     for j = 2:ny
-        R.y[1  , j] = -(V.y[2    , j] - V.y[1  , j]) / dx
-        R.y[end, j] = -(V.y[end-1, j] - V.y[end, j]) / dx
+        η_r   = 0.25 * (η[end, j-1] + η[end-1, j-1] + η[end, j] + η[end-1, j])
+        η_l   = 0.25 * (η[1  , j-1] + η[2    , j-1] + η[1  , j] + η[2    , j])
+        R.y[1  , j] = -η_l * (V.y[2    , j] - V.y[1  , j]) / dx^2
+        R.y[end, j] = -η_r * (V.y[end-1, j] - V.y[end, j]) / dx^2
     end
     return nothing
 end
@@ -166,4 +171,7 @@ function construct_jacobian(n=5)
     return J
 end
 
-J = construct_jacobian(4);
+J = construct_jacobian(8);
+
+sparse(J)
+d = sparse(J - J')
