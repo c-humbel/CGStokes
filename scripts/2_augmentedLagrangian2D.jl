@@ -23,8 +23,7 @@ function compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
     # pressure update
     for j = 1:ny
         for i = 1:nx
-            ∇V = (V.x[i+1, j] - V.x[i, j]) / dx + (V.y[i, j+1] - V.y[i, j]) / dy
-            P[i, j] = P_old[i, j] - γ * ∇V
+            P[i, j] = P_old[i, j] - γ * ((V.x[i+1, j] - V.x[i, j]) / dx + (V.y[i, j+1] - V.y[i, j]) / dy)
         end
     end
 
@@ -95,24 +94,26 @@ function update_D!(D, R, Minv, β)
 end
 
 
-function compute_α(R, Ad, P, P̄, P_old, V, D, ρg, η, rMr, dx, dy, γ)
+function compute_α(R, Ad, P, P_tmp, P_old, V, D, ρg, η, rMr, dx, dy, γ)
     # compute Jacobian-vector product Jac(R) * D using Enzyme
     # result is stored in Ad
-    autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Ad), Duplicated(P, P̄), Const(P_old), Duplicated(V, D), Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
-    # compute α = -dot(R, M*R) / dot(D, A*D)
-    return  rMr / (dot(D.x[2:end-1, 2:end-1], Ad.x) + dot(D.y[2:end-1, 2:end-1], Ad.y))
+    autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Ad), Duplicated(P, P_tmp), Const(P_old), Duplicated(V, D), Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
+    # compute α = dot(R, M*R) / dot(D, A*D)
+    # note that, since R = rhs - A*V, ∂R/∂V * D = -A * D
+    # therefore we use here the negative of the Jacobian-vector product
+    return  rMr / (dot(D.x[2:end-1, 2:end-1], -Ad.x) + dot(D.y[2:end-1, 2:end-1], -Ad.y))
 end
 
 
 function update_V!(V, D, α)
     for j = 2:size(V.x, 2)-1
         for i = 2:size(V.x, 1)-1
-            V.x[i, j] -= α * D.x[i, j]
+            V.x[i, j] += α * D.x[i, j]
         end
     end
     for j = 2:size(V.y, 2)-1
         for i = 2:size(V.y, 1)-1
-            V.y[i, j] -= α * D.y[i, j]
+            V.y[i, j] += α * D.y[i, j]
         end
     end
     return nothing
@@ -154,7 +155,7 @@ function linearStokes2D(η_ratio=0.1; niter_in=1000, niter_out=1000, ncheck=2000
     ρg     = [x^2 + y^2 < R_in^2 ? ρg_in : 0.    for x=xs, y=ys]
     P      = zeros(nx, ny)
     P_old  = zeros(nx, ny)
-    P̄      = zeros(nx, ny)
+    P_tmp  = zeros(nx, ny)
     divV   = zeros(nx, ny)
     V      = (x =zeros(nx+1, ny  ), y =zeros(nx  , ny+1))
     D      = (x =zeros(nx+1, ny  ), y =zeros(nx  , ny+1))  # search direction of CG, outer cells are zero
@@ -190,7 +191,7 @@ function linearStokes2D(η_ratio=0.1; niter_in=1000, niter_out=1000, ncheck=2000
         D.y[2:end-1, 2:end-1] .= Minv.y .* R.y
         rMr = dot(R.x, Minv.x .* R.x) + dot(R.y, Minv.y .* R.y)
         while it_in <= niter_in && err_in > max_err
-            α = compute_α(R, Ad, P, P̄, P_old, V, D, ρg, η, rMr, dx, dy, γ)
+            α = compute_α(R, Ad, P, P_tmp, P_old, V, D, ρg, η, rMr, dx, dy, γ)
             update_V!(V, D, α)
             neumann_bc_y!(V.x)
             neumann_bc_x!(V.y)
@@ -248,30 +249,30 @@ end
 
 
 
-function create_convergence_plot(errs_in, errs_out, ncheck, ninner, η_ratio; savefig=false)
+function create_convergence_plot(errs_in, errs_out, ncheck, ninner, η_ratio, nx; savefig=false)
     fig = Figure()
-    ax = Axis(fig[1,1], xlabel="Iterations", ylabel="log₁₀(Mean Abs. Residual)", title="η ratio=$η_ratio")
+    ax = Axis(fig[1,1], xlabel="Iterations / nx", ylabel="log₁₀(Mean Abs. Residual)", title="η ratio=$η_ratio")
     iters_out = [ninner * i for i=1:length(errs_out)]
     iters_out[end] = ncheck * length(errs_in)
-    lines!(ax, ncheck .* (1:length(errs_in)), log10.(errs_in), color=:red, label="Velocity")
-    scatter!(ax, iters_out, log10.(errs_out), color=:blue, label="Pressure")
+    lines!(ax, ncheck .* (1:length(errs_in)) ./ nx, log10.(errs_in), color=:red, label="Velocity")
+    scatter!(ax, iters_out ./ nx, log10.(errs_out), color=:blue, label="Pressure")
     axislegend(ax, position=:rt)
     if savefig
-        save("1_convergence_$(η_ratio)_$(ninner).png", fig)
+        save("2_convergence_$(η_ratio)_$(ninner).png", fig)
     else
         display(fig)
     end
     return nothing
-    
 end
 
-eta = 0.1
-ninner=10000
-nouter=10
+eta = 1e-1
+n   = 127
+ninner=20000
+nouter=1
 ncheck=100
 
-outfields = linearStokes2D(eta; niter_in=ninner, niter_out=nouter, ncheck=ncheck)
+outfields = linearStokes2D(eta; niter_in=ninner, niter_out=nouter, ncheck=ncheck, n=n)
 
 #create_output_plot(outfields...; ncheck=ncheck, ninner=ninner, η_ratio=eta, savefig=true)
 
-create_convergence_plot(outfields[4:5]..., ncheck, ninner, eta; savefig=false)
+create_convergence_plot(outfields[4:5]..., ncheck, ninner, eta, n; savefig=true)
