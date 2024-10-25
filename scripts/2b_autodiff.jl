@@ -15,6 +15,4 @@ p.x[1] = 0; p.x[end] = 0
 p.y[1] = 0; p.y[end] = 0
 s = (x=zeros(9), y=zeros(9))
 t = (x=zeros(9), y=zeros(9))
-# autodiff(Forward, f, Duplicated(s, t), Duplicated(u, p), Const(3), Const(2), Const(10000))
-
-f(t, p, 3, 2, 0)
+autodiff(Forward, f, Duplicated(s, t), Duplicated(u, p), Const(3), Const(2), Const(10000))
