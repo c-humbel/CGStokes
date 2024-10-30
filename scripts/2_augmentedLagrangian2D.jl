@@ -176,6 +176,7 @@ function linearStokes2D(η_ratio=0.1; niter_in=1000, niter_out=1000, ncheck=2000
     # visualisation
     errs_in = []
     errs_out = []
+    itercounts = []
 
     err_out = 2 * max_err
     it_out = 1
@@ -209,29 +210,31 @@ function linearStokes2D(η_ratio=0.1; niter_in=1000, niter_out=1000, ncheck=2000
         compute_divV!(divV, V, dx, dy)
         err_out = norm(divV, 1) / length(divV)
         push!(errs_out, err_out)
+        push!(itercounts, it_in)
         println(it_out , " outer iterations: error = ", err_out)
         it_out += 1
     end
 
     # println("outer iteration stopped at $it_out with error $err_out")
 
-    return P, V, R, errs_in, errs_out, xs, ys
+    return P, V, R, errs_in, errs_out, itercounts, xs, ys
 end
 
 
-function create_output_plot(P, V, R, errs_in, errs_out, xs, ys; ncheck, ninner, η_ratio, savefig=false)
+function create_output_plot(P, V, R, errs_in, errs_out, itercounts, xs, ys; ncheck, η_ratio, savefig=false)
     dy = ys[2] - ys[1]
+    nx = size(P, 1)
     fig = Figure(size=(800, 600))
     axs = (P=Axis(fig[1,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Pressure"),
-        err=Axis(fig[1,2][1,1], xlabel="Iterations", title="Mean Absolute Residual (log)"),
+        err=Axis(fig[1,2][1,1], xlabel="Iterations / nx", title="Mean Absolute Residual (log)"),
         Vy=Axis(fig[2,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity"),
         Ry=Axis(fig[2,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity Residual (log)"))
     # compute location of outer iteration errors
-    iters_out = [ninner * i for i=1:length(errs_out)]
-    iters_out[end] = ncheck * length(errs_in)
-    scatter!(axs.err, iters_out, log10.(errs_out), color=:blue, label="Pressure")
+    iters_out = cumsum(itercounts)
+    iters_in  = ncheck .* (1:length(errs_in))
+    scatter!(axs.err, iters_out ./ nx, log10.(errs_out), color=:blue, label="Pressure")
     plt = (P=image!(axs.P, (xs[1], xs[end]), (ys[1], ys[end]), P, colormap=:inferno),
-           err=lines!(axs.err, ncheck .* (1:length(errs_in)), log10.(errs_in), color=:red, label="Velocity"),
+           err=lines!(axs.err, iters_in ./ nx, log10.(errs_in), color=:red, label="Velocity"),
            Vy=image!(axs.Vy, (xs[1], xs[end]), (ys[1]-dy/2, ys[end]+dy/2), V.y, colormap=:inferno),
            Ry=image!(axs.Ry, (xs[2], xs[end-1]), (ys[1]+dy/2, ys[end]-dy/2), log10.(abs.(R.y)), colormap=:inferno))
     Colorbar(fig[1, 1][1, 2], plt.P)
@@ -240,7 +243,7 @@ function create_output_plot(P, V, R, errs_in, errs_out, xs, ys; ncheck, ninner, 
     axislegend(axs.err, position=:rt)
 
     if savefig
-        save("2_output_$(η_ratio)_$(ninner).png", fig)
+        save("2_output_$(η_ratio)_$(maximum(itercounts)).png", fig)
     else
         display(fig)
     end
@@ -267,12 +270,12 @@ end
 
 eta = 1e-1
 n   = 127
-ninner=20000
-nouter=1
-ncheck=100
+ninner=2000
+nouter=200
+ncheck=500
 
 outfields = linearStokes2D(eta; niter_in=ninner, niter_out=nouter, ncheck=ncheck, n=n)
 
-#create_output_plot(outfields...; ncheck=ncheck, ninner=ninner, η_ratio=eta, savefig=true)
+create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta, savefig=true)
 
-create_convergence_plot(outfields[4:5]..., ncheck, ninner, eta, n; savefig=true)
+create_convergence_plot(outfields[4:5]..., ncheck, ninner, eta, n; savefig=false)
