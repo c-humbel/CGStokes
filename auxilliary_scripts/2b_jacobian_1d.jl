@@ -1,5 +1,6 @@
 using Enzyme, LinearAlgebra
 
+# discrete Energy functional
 function E(u, ∇u, dx)
     u[1] = 0.0
     u[end] = 1.0
@@ -31,7 +32,7 @@ function residual!(r, u, q, dx)
     return
 end
 
-
+# construct the Jacobian matrix using AD of residual function
 nx = 5
 dx = 1 / (nx - 1)
 
@@ -62,18 +63,19 @@ for irow in 1:nx
     J[irow, :] .= dr
 end
 
+J = J[2:end-1, 2:end-1]
 
+@assert issymmetric(J)
+@assert isposdef(J)
+
+
+# construct the Jacobian matrix using AD of Energy functional
 ∇u = zeros(nx - 1)
 
 ū  = make_zero(u)
 ∇ū = make_zero(∇u)
 
 autodiff(Reverse, E, Duplicated(u, ū), Duplicated(∇u, ∇ū), Const(dx))
-
-J = J[2:end-1, 2:end-1]
-
-@assert issymmetric(J)
-@assert isposdef(J)
 
 display(J)
 display(r)
