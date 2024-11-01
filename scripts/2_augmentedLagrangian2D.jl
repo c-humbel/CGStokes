@@ -18,56 +18,92 @@ end
 
 function compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
     nx, ny = size(P)
-    # compute the residual at cell interfaces
+    nx, ny = size(P)
 
-    # pressure update
+    ### Dirichlet boundary conditions
+    # wall normal velocities are zero
+    for j = 1:ny
+        V.x[1  , j] = 0.
+        V.x[end, j] = 0.
+    end
+
+    for i = 1:nx
+        V.y[i, 1  ] = 0.
+        V.y[i, end] = 0.
+    end
+
+    ### pressure update
     for j = 1:ny
         for i = 1:nx
             P[i, j] = P_old[i, j] - γ * ((V.x[i+1, j] - V.x[i, j]) / dx + (V.y[i, j+1] - V.y[i, j]) / dy)
         end
     end
 
-    # in horizontal (x) direction
-    for j = 1:ny-2
-        for i = 1:nx-1
+    ### residual at cell interfaces
+    ## in horizontal (x) direction
+    ## including Neumann BC on Vx at top and bottom boundary
+    for j = 1:ny  # all values in y direction
+        for i = 2:nx  # inner values in x direction
             # stress at horizontally adjacent cell centers
-            τxx_r = 2 * η[i+1, j+1] * (V.x[i+2, j+1] - V.x[i+1, j+1]) / dx
-            τxx_l = 2 * η[i  , j+1] * (V.x[i+1, j+1] - V.x[i  , j+1]) / dx
-            # viscosity at vertically adjacent cell corners
-            η_t   = 0.25 * (η[i, j+1] + η[i+1, j+1] + η[i, j+2] + η[i+1, j+2])
-            η_b   = 0.25 * (η[i, j  ] + η[i+1, j  ] + η[i, j+1] + η[i+1, j+1])
-            # stress at same cell corners
-            τxy_t = η_t * ((V.x[i+1, j+2] - V.x[i+1, j+1]) / dy
-                         + (V.y[i+1, j+2] - V.y[i  , j+2]) / dx)
-            τxy_b = η_b * ((V.x[i+1, j+1] - V.x[i+1, j  ]) / dy
-                         + (V.y[i+1, j+1] - V.y[i  , j+1]) / dx)
+            τxx_r = 2 * η[i  , j] * (V.x[i+1, j] - V.x[i  , j]) / dx
+            τxx_l = 2 * η[i-1, j] * (V.x[i  , j] - V.x[i-1, j]) / dx
+
+            # stress at vertically adjacent cell corners
+            if j > 1
+                η_b   = 0.25 * (η[i-1, j-1] + η[i, j-1] + η[i-1, j] + η[i, j])
+                τxy_b = η_b * ((V.x[i, j] - V.x[i  , j-1]) / dy
+                             + (V.y[i, j] - V.y[i-1, j  ]) / dx)
+            else
+                τxy_b = 0.  # zero stress at the bottom boundary
+            end
+
+            if j < ny
+                η_t   = 0.25 * (η[i-1, j] + η[i, j] + η[i-1, j+1] + η[i, j+1])
+                τxy_t = η_t * ((V.x[i, j+1] - V.x[i  , j  ]) / dy
+                             + (V.y[i, j+1] - V.y[i-1, j+1]) / dx)
+            else
+                τxy_t = 0.  # zero stress at the top boundary
+            end
+
+
             # residual in x direction on the interface
             R.x[i, j]  = (- (τxx_r - τxx_l) / dx
                           - (τxy_t - τxy_b) / dy
-                          + (P[i+1, j+1] - P[i, j+1]) / dx)
+                          + (P[i, j] - P[i-1, j]) / dx)
         end
     end
 
-    # residual in y direction
-    for j = 1:ny-1
-        for i = 1:nx-2
-            τyy_t = 2 * η[i+1, j+1] * (V.y[i+1, j+2] - V.y[i+1, j+1]) / dy
-            τyy_b = 2 * η[i+1, j  ] * (V.y[i+1, j+1] - V.y[i+1, j  ]) / dy
+    ## in vertical (y) direction
+    ## including Neumann BC on Vy at left and right boundary
+    for j = 2:ny  # inner values in y direction
+        for i = 1:nx  # all values in x direction
+            τyy_t = 2 * η[i, j  ] * (V.y[i, j+1] - V.y[i, j  ]) / dy
+            τyy_b = 2 * η[i, j-1] * (V.y[i, j  ] - V.y[i, j-1]) / dy
 
-            η_r   = 0.25 * (η[i+1, j  ] + η[i+2, j  ] + η[i+1, j+1] + η[i+2, j+1])
-            η_l   = 0.25 * (η[i  , j  ] + η[i+1, j  ] + η[i  , j+1] + η[i+1, j+1])
+            if i > 1
+                η_l   = 0.25 * (η[i-1, j-1] + η[i, j-1] + η[i-1, j] + η[i, j])
+                τxy_l = η_l * ((V.x[i, j] - V.x[i  , j-1]) / dy
+                             + (V.y[i, j] - V.y[i-1, j  ]) / dx)
+            else
+                τxy_l = 0.  # zero stress at the left boundary
+            end
 
-            τxy_r = η_r * ((V.x[i+2, j+1] - V.x[i+2, j  ]) / dy
-                         + (V.y[i+2, j+1] - V.y[i+1, j+1]) / dx)
-            τxy_l = η_l * ((V.x[i+1, j+1] - V.x[i+1, j  ]) / dy
-                         + (V.y[i+1, j+1] - V.y[i  , j+1]) / dx)
+            if i < nx
+                η_r   = 0.25 * (η[i, j-1] + η[i+1, j-1] + η[i, j] + η[i+1, j])
+                τxy_r = η_r * ((V.x[i+1, j] - V.x[i+1, j-1]) / dy
+                             + (V.y[i+1, j] - V.y[i  , j  ]) / dx)
+            else
+                τxy_r = 0.  # zero stress at the right boundary
+            end
             
-            R.y[i, j]  = ( - (τyy_t - τyy_b) / dy
-                           - (τxy_r - τxy_l) / dx
-                           + (P[i+1, j+1] - P[i+1, j]) / dy
-                           - (ρg[i+1, j+1] + ρg[i+1, j]) * 0.5)
+            R.y[i, j] = ( - (τyy_t - τyy_b) / dy
+                          - (τxy_r - τxy_l) / dx
+                          + ( P[i, j] -  P[i, j-1]) / dy
+                          - (ρg[i, j] + ρg[i, j-1]) * 0.5)
         end
     end
+
+    # Residuals corresponding to cells affected by Dirichlet BC are left zero
     return nothing
 end
 
@@ -79,15 +115,15 @@ end
 
 
 function update_D!(D, R, Minv, β)
-    for j = 2:size(D.x, 2)-1
+    for j = 1:size(D.x, 2)
         for i = 2:size(D.x, 1)-1
-            D.x[i, j] = Minv.x[i-1, j-1] * R.x[i-1, j-1] + β * D.x[i, j]
+            D.x[i, j] = Minv.x[i, j] * R.x[i, j] + β * D.x[i, j]
         end
     end
 
     for j = 2:size(D.y, 2)-1
-        for i = 2:size(D.y, 1)-1
-            D.y[i, j] = Minv.y[i-1, j-1] * R.y[i-1, j-1] + β * D.y[i, j]
+        for i = 1:size(D.y, 1)
+            D.y[i, j] = Minv.y[i, j] * R.y[i, j] + β * D.y[i, j]
         end
     end
     return nothing
@@ -97,22 +133,24 @@ end
 function compute_α(R, Ad, P, P_tmp, P_old, V, D, ρg, η, rMr, dx, dy, γ)
     # compute Jacobian-vector product Jac(R) * D using Enzyme
     # result is stored in Ad
-    autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Ad), Duplicated(P, P_tmp), Const(P_old), Duplicated(V, D), Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
+    autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Ad),
+             Duplicated(P, P_tmp), Const(P_old), Duplicated(V, D),
+             Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
     # compute α = dot(R, M*R) / dot(D, A*D)
     # note that, since R = rhs - A*V, ∂R/∂V * D = -A * D
     # therefore we use here the negative of the Jacobian-vector product
-    return  rMr / (dot(D.x[2:end-1, 2:end-1], -Ad.x) + dot(D.y[2:end-1, 2:end-1], -Ad.y))
+    return  rMr / (dot(D.x, -Ad.x) + dot(D.y, -Ad.y))
 end
 
 
 function update_V!(V, D, α)
-    for j = 2:size(V.x, 2)-1
+    for j = 1:size(V.x, 2)
         for i = 2:size(V.x, 1)-1
             V.x[i, j] += α * D.x[i, j]
         end
     end
     for j = 2:size(V.y, 2)-1
-        for i = 2:size(V.y, 1)-1
+        for i = 1:size(V.y, 1)
             V.y[i, j] += α * D.y[i, j]
         end
     end
@@ -120,30 +158,50 @@ function update_V!(V, D, α)
 end
 
 
-function neumann_bc_x!(f)
-    for j = axes(f, 2)
-        f[1,   j] = f[2,     j]
-        f[end, j] = f[end-1, j]
+function initialise_Minv(Minv, η, dx, dy, γ)
+    nx, ny = size(η)
+
+    preθv = min(dx, dy)^2 / 4.1
+
+    ## inner points
+    # x direction
+    for j = 2:ny-1
+        for i = 2:nx
+            Minv.x[i, j] = preθv / (max(η[i-1, j-1], η[i-1, j], η[i-1, j+1], η[i, j-1], η[i, j], η[i, j+1]) + γ)
+        end
     end
-    return nothing
+    # y direction
+    for j = 2:ny
+        for i = 2:nx-1
+            Minv.y[i, j] = preθv / (max(η[i-1, j-1], η[i-1, j], η[i, j-1], η[i, j], η[i+1, j-1], η[i+1, j]) + γ)
+        end
+    end
+
+    ## Neumann boundary points
+    # x direction
+    for i = 2:nx
+        Minv.x[i, 1 ] = preθv / (max(η[i-1, 1   ], η[i-1, 2 ], η[i, 1   ], η[i, 2 ]) + γ)
+        Minv.x[i, ny] = preθv / (max(η[i-1, ny-1], η[i-1, ny], η[i, ny-1], η[i, ny]) + γ)
+    end
+    # y direction
+    for j = 2:ny
+        Minv.y[1 , j] = preθv / (max(η[1   , j-1], η[1   , j], η[2 , j-1], η[2 , j]) + γ)
+        Minv.y[nx, j] = preθv / (max(η[nx-1, j-1], η[nx-1, j], η[nx, j-1], η[nx, j]) + γ)
+    end
+
+    ## Dirichlet boundary points, leave zero
+    return Minv
+    
 end
 
-function neumann_bc_y!(f)
-    for i = axes(f, 1)
-        f[i, 1  ] = f[i, 2    ]
-        f[i, end] = f[i, end-1]
-    end
-    return nothing
-end
 
-
-function linearStokes2D(η_ratio=0.1; niter_in=1000, niter_out=1000, ncheck=2000, max_err=1e-6, n=127)
+function linearStokes2D(; n=127,
+                        η_in=0.1, η_out=1., ρg_in=1.,
+                        niter_in=1000, niter_out=100, ncheck=100,
+                        γ_factor=1.,
+                        max_err=1e-6)
     Lx = Ly = 10.
     R_in  = 1.
-    η_out = 1.
-    η_in  = η_ratio * η_out
-    ρg_in = 1.
-
     nx = ny = n
 
     dx, dy = Lx / nx, Ly / ny
@@ -157,20 +215,17 @@ function linearStokes2D(η_ratio=0.1; niter_in=1000, niter_out=1000, ncheck=2000
     P_old  = zeros(nx, ny)
     P_tmp  = zeros(nx, ny)
     divV   = zeros(nx, ny)
-    V      = (x =zeros(nx+1, ny  ), y =zeros(nx  , ny+1))
-    D      = (x =zeros(nx+1, ny  ), y =zeros(nx  , ny+1))  # search direction of CG, outer cells are zero
-    R      = (x =zeros(nx-1, ny-2), y =zeros(nx-2, ny-1))  # Residuals of velocity PDE
-    Ad     = (x =zeros(nx-1, ny-2), y =zeros(nx-2, ny-1))  # Jacobian of compute_R wrt. V, multiplied by search vector D
+    V      = (x=zeros(nx+1, ny), y=zeros(nx, ny+1))
+    D      = (x=zeros(nx+1, ny), y=zeros(nx, ny+1))  # search direction of CG, cells affecting Dirichlet BC are zero
+    R      = (x=zeros(nx+1, ny), y=zeros(nx, ny+1))  # Residuals of velocity PDE, cells affected by Dirichlet BC are zero
+    Ad     = (x=zeros(nx+1, ny), y=zeros(nx, ny+1))  # Jacobian of compute_R wrt. V, multiplied by search vector D
+    Minv   = (x=zeros(nx+1, ny), y=zeros(nx, ny+1))  # preconditioner, cells correspoinding to Dirichlet BC are zero
     
     # Coefficient of augmented Lagrangian
-    γ = inv(maximum(η))
+    γ = γ_factor*maximum(η)
 
     # preconditioner
-    preθv = min(dx, dy)^2 / 4.1
-    Minv = (x=[preθv / (max(η[i, j], η[i+1, j], η[i, j+1], η[i+1, j+1], η[i, j+2], η[i+1, j+2]) + γ)
-                for i=1:nx-1, j=1:ny-2],
-            y=[preθv / (max(η[i, j], η[i+1, j], η[i+2, j], η[i, j+1], η[i+1, j+1], η[i+2, j+1]) + γ)
-                for i=1:nx-2, j=1:ny-1])
+    initialise_Minv(Minv, η, dx, dy, γ)
 
     
     # visualisation
@@ -188,14 +243,12 @@ function linearStokes2D(η_ratio=0.1; niter_in=1000, niter_out=1000, ncheck=2000
         # iteration zero
         P_old .= P
         compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
-        D.x[2:end-1, 2:end-1] .= Minv.x .* R.x
-        D.y[2:end-1, 2:end-1] .= Minv.y .* R.y
+        D.x .= Minv.x .* R.x
+        D.y .= Minv.y .* R.y
         rMr = dot(R.x, Minv.x .* R.x) + dot(R.y, Minv.y .* R.y)
         while it_in <= niter_in && err_in > max_err
             α = compute_α(R, Ad, P, P_tmp, P_old, V, D, ρg, η, rMr, dx, dy, γ)
             update_V!(V, D, α)
-            neumann_bc_y!(V.x)
-            neumann_bc_x!(V.y)
             compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
             β, rMr = compute_β_rMr(rMr, R, Minv)
             update_D!(D, R, Minv, β)
@@ -240,7 +293,7 @@ function create_output_plot(P, V, R, errs_in, errs_out, itercounts, xs, ys; nche
     Colorbar(fig[1, 1][1, 2], plt.P)
     Colorbar(fig[2, 1][1, 2], plt.Vy)
     Colorbar(fig[2, 2][1, 2], plt.Ry)
-    axislegend(axs.err, position=:rt)
+    axislegend(axs.err, position=:lb)
 
     if savefig
         save("2_output_$(η_ratio)_$(maximum(itercounts)).png", fig)
@@ -252,30 +305,35 @@ end
 
 
 
-function create_convergence_plot(errs_in, errs_out, ncheck, ninner, η_ratio, nx; savefig=false)
+function create_convergence_plot(errs_in, errs_out, itercounts; ncheck, η_ratio, nx, savefig=false)
     fig = Figure()
     ax = Axis(fig[1,1], xlabel="Iterations / nx", ylabel="log₁₀(Mean Abs. Residual)", title="η ratio=$η_ratio")
-    iters_out = [ninner * i for i=1:length(errs_out)]
-    iters_out[end] = ncheck * length(errs_in)
-    lines!(ax, ncheck .* (1:length(errs_in)) ./ nx, log10.(errs_in), color=:red, label="Velocity")
+    iters_out = cumsum(itercounts)
+    iters_in  = ncheck .* (1:length(errs_in))
+    lines!(ax, iters_in ./ nx, log10.(errs_in), color=:red, label="Velocity")
     scatter!(ax, iters_out ./ nx, log10.(errs_out), color=:blue, label="Pressure")
     axislegend(ax, position=:rt)
     if savefig
-        save("2_convergence_$(η_ratio)_$(ninner).png", fig)
+        save("2_convergence_$(η_ratio)_$(maximum(itercounts)).png", fig)
     else
         display(fig)
     end
     return nothing
 end
 
-eta = 1e-1
-n   = 127
-ninner=2000
-nouter=200
-ncheck=500
+eta_outer = 1e-4
+eta_inner = 1.
+n     = 127
+ninner=10000
+nouter=100
+ncheck=100
 
-outfields = linearStokes2D(eta; niter_in=ninner, niter_out=nouter, ncheck=ncheck, n=n)
+outfields = linearStokes2D(n=127,
+                           η_in=eta_inner, η_out=eta_outer, ρg_in=eta_outer,
+                           niter_in=ninner, niter_out=nouter, ncheck=ncheck,
+                           γ_factor=0.1,
+                           max_err=1e-6)
 
-create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta, savefig=true)
+create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, savefig=false)
 
-create_convergence_plot(outfields[4:5]..., ncheck, ninner, eta, n; savefig=false)
+create_convergence_plot(outfields[4:6]...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, nx=n, savefig=false)
