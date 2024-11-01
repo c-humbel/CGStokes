@@ -10,12 +10,12 @@ using SparseArrays
 # 2. add boundary conditions to the residuals
 # 3. Insead of having residuals from BC, apply them directly to the velocity field (supersedes point 2)
 # 4. split Neumann and Dirchlet BC: apply Dirichlet, and include Neumann in the residual (supersedes point 2,3)
+# 5. apply Dirichlet BC directly, and Neumann BC by imposing zero stress at the corresponding boundary
 function compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
 
     nx, ny = size(P)
 
     ### Dirichlet boundary conditions
-
     # wall normal velocities are zero
     for j = 1:ny
         V.x[1  , j] = 0.
@@ -36,7 +36,7 @@ function compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
 
     ### residual at cell interfaces
     ## in horizontal (x) direction
-    ##  including Neumann BC on Vx at top and bottom boundary
+    ## including Neumann BC on Vx at top and bottom boundary
     for j = 1:ny  # all values in y direction
         for i = 2:nx  # inner values in x direction
             # stress at horizontally adjacent cell centers
@@ -114,21 +114,21 @@ function construct_jacobian(n=5)
     R      = (x =zeros(nx+1, ny  ), y =zeros(nx  , ny+1)) 
     colJ   = (x =zeros(nx+1, ny  ), y =zeros(nx  , ny+1)) # variable to store columns of the jacobian
 
-    nxe = (nx-1) * ny
-    nye = nx * (ny-1)
+    nxe = (nx+1) * ny
+    nye = nx * (ny+1)
     J   = zeros(nxe + nye, nxe + nye) 
 
     col = 1
     for j = 1:ny
-        for i = 2:nx
+        for i = 1:nx+1
             # set one entry in search vector to 1
             e.x[i, j] = 1.0
             # compute the jacobian column by multiplying it with a "basis vector"
             autodiff(Forward, compute_R!, DuplicatedNoNeed(R, colJ), Duplicated(P, P_tmp), Const(P_old), Duplicated(V, e), Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
             # store result in jacobian
             # remove cells affected by Dirichlet BC ("ghost cells")
-            J[1:nxe, col]     .= reshape(colJ.x[2:end-1, :], nxe)
-            J[nxe+1:end, col] .= reshape(colJ.y[:, 2:end-1], nye)
+            J[1:nxe, col]     .= reshape(colJ.x, nxe)
+            J[nxe+1:end, col] .= reshape(colJ.y, nye)
             # increase column count
             col += 1
             # reset search vector
@@ -136,12 +136,12 @@ function construct_jacobian(n=5)
         end
     end
 
-    for j = 2:ny
+    for j = 1:ny+1
         for i = 1:nx
             e.y[i, j] = 1.0
             autodiff(Forward, compute_R!, DuplicatedNoNeed(R, colJ), Duplicated(P, P_tmp), Const(P_old), Duplicated(V, e), Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
-            J[1:nxe, col] .= reshape(colJ.x[2:end-1, :], nxe)
-            J[nxe+1:end, col] .= reshape(colJ.y[:, 2:end-1], nye)
+            J[1:nxe, col] .= reshape(colJ.x, nxe)
+            J[nxe+1:end, col] .= reshape(colJ.y, nye)
             col += 1
             e.y[i, j] = 0.0
         end
@@ -154,6 +154,5 @@ J = construct_jacobian();
 
 spJ = sparse(J)
 
-@assert issparse(spJ)
-@assert isposdef(spJ)
+@assert issymmetric(spJ)
  
