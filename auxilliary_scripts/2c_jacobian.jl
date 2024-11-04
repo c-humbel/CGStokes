@@ -1,6 +1,7 @@
 using Enzyme
 using LinearAlgebra
 using SparseArrays
+using Random
 
 # copy of the residual computation in 2_augmentedLagrangian2D.jl
 
@@ -100,11 +101,12 @@ function compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
     return nothing
 end
 
-function construct_jacobian(n=5)
+function construct_jacobian(n=5; seed=1)
+    rng = Random.MersenneTwister(seed)
     nx, ny = n, n
     dx, dy = 1/nx, 1/ny
     γ      = 5.0
-    η      =  rand(nx, ny)
+    η      = rand(rng, nx, ny)
     ρg     = zeros(nx, ny)
     P      = zeros(nx, ny)
     P_old  = zeros(nx, ny)
@@ -150,9 +152,75 @@ function construct_jacobian(n=5)
     return J
 end
 
+
+# construct diagonal preconditioner
+function construct_M(n=5, seed=1)
+    rng = Random.MersenneTwister(seed)
+    nx, ny = n, n
+    dx, dy = 1/nx, 1/ny
+    γ      = 5.0
+    η      = rand(rng, nx, ny)
+    Minv = (x = zeros(nx+1, ny), y = zeros(nx, ny+1))
+
+    ## inner points
+    # x direction
+    for j = 2:ny-1
+        for i = 2:nx
+            mij = ((2 / dx^2 + 1 / 2dy^2) * (η[i-1, j] + η[i, j])
+                  + 1 / 4dy^2 * (η[i-1, j-1] + η[i-1, j+1] + η[i, j-1] + η[i, j+1])
+                  + 2 * γ / dx^2)
+            Minv.x[i, j] = inv(mij)
+        end
+    end
+    # y direction
+    for j = 2:ny
+        for i = 2:nx-1
+            mij = ((2 / dy^2 + 1 / 2dx^2) * (η[i, j-1] + η[i, j])
+                  + 1 / 4dx^2 * (η[i-1, j-1] + η[i+1, j-1] + η[i-1, j] + η[i+1, j])
+                  + 2 * γ / dy^2)
+            Minv.y[i, j] = inv(mij)
+        end
+    end
+
+    ## Neumann boundary points
+    # x direction
+    for i = 2:nx
+        Minv.x[i, 1 ] = inv((2 / dx^2 + 1 / 4dy^2) * (η[i-1, 1] + η[i, 1])
+                            + 1 / 4dy^2 * (η[i-1, 2] + η[i, 2])
+                            + 2 * γ / dx^2)
+        Minv.x[i, ny] = inv((2 / dx^2 + 1 / 4dy^2) * (η[i-1, ny] + η[i, ny])
+                            + 1 / 4dy^2 * (η[i-1, ny-1] + η[i, ny-1])
+                            + 2 * γ / dx^2)
+    end
+    # y direction
+    for j = 2:ny
+        Minv.y[1 , j] = inv((2 / dy^2 + 1 / 4dx^2) * (η[1, j-1] + η[1, j])
+                            + 1 / 4dx^2 * (η[2, j-1] + η[2, j])
+                            + 2 * γ / dy^2)
+        Minv.y[nx, j] = inv((2 / dy^2 + 1 / 4dx^2) * (η[nx, j-1] + η[nx, j])
+                            + 1 / 4dx^2 * (η[nx-1, j-1] + η[nx-1, j])
+                            + 2 * γ / dy^2)
+    end
+
+    ## Dirichlet boundary points, leave zero
+    return Minv
+    
+end
+
+## check that the jacobian is symmetric
 J = construct_jacobian();
 
 spJ = sparse(J)
 
 @assert issymmetric(spJ)
  
+## check that the preconditioner is correct
+M = construct_M();
+m = vcat(reshape(M.x, length(M.x)), reshape(M.y, length(M.y)))
+
+# reference values of the preconditioner
+mexact = diag(J)
+minv_exact = zeros(length(mexact))
+minv_exact[mexact .!= 0] = inv.(mexact[mexact .!= 0]) 
+
+@assert all(m .≈ minv_exact)

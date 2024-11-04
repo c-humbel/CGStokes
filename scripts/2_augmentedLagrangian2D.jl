@@ -161,36 +161,47 @@ end
 function initialise_Minv(Minv, η, dx, dy, γ)
     nx, ny = size(η)
 
-    preθv = min(dx, dy)^2 / 4.1
-
-    ## inner points
-    # x direction
     for j = 2:ny-1
         for i = 2:nx
-            Minv.x[i, j] = preθv / (max(η[i-1, j-1], η[i-1, j], η[i-1, j+1], η[i, j-1], η[i, j], η[i, j+1]) + γ)
+            mij = ((2 / dx^2 + 1 / 2dy^2) * (η[i-1, j] + η[i, j])
+                  + 1 / 4dy^2 * (η[i-1, j-1] + η[i-1, j+1] + η[i, j-1] + η[i, j+1])
+                  + 2 * γ / dx^2)
+            Minv.x[i, j] = inv(mij)
         end
     end
     # y direction
     for j = 2:ny
         for i = 2:nx-1
-            Minv.y[i, j] = preθv / (max(η[i-1, j-1], η[i-1, j], η[i, j-1], η[i, j], η[i+1, j-1], η[i+1, j]) + γ)
+            mij = ((2 / dy^2 + 1 / 2dx^2) * (η[i, j-1] + η[i, j])
+                  + 1 / 4dx^2 * (η[i-1, j-1] + η[i+1, j-1] + η[i-1, j] + η[i+1, j])
+                  + 2 * γ / dy^2)
+            Minv.y[i, j] = inv(mij)
         end
     end
 
     ## Neumann boundary points
     # x direction
     for i = 2:nx
-        Minv.x[i, 1 ] = preθv / (max(η[i-1, 1   ], η[i-1, 2 ], η[i, 1   ], η[i, 2 ]) + γ)
-        Minv.x[i, ny] = preθv / (max(η[i-1, ny-1], η[i-1, ny], η[i, ny-1], η[i, ny]) + γ)
+        Minv.x[i, 1 ] = inv((2 / dx^2 + 1 / 4dy^2) * (η[i-1, 1] + η[i, 1])
+                            + 1 / 4dy^2 * (η[i-1, 2] + η[i, 2])
+                            + 2 * γ / dx^2)
+        Minv.x[i, ny] = inv((2 / dx^2 + 1 / 4dy^2) * (η[i-1, ny] + η[i, ny])
+                            + 1 / 4dy^2 * (η[i-1, ny-1] + η[i, ny-1])
+                            + 2 * γ / dx^2)
     end
     # y direction
     for j = 2:ny
-        Minv.y[1 , j] = preθv / (max(η[1   , j-1], η[1   , j], η[2 , j-1], η[2 , j]) + γ)
-        Minv.y[nx, j] = preθv / (max(η[nx-1, j-1], η[nx-1, j], η[nx, j-1], η[nx, j]) + γ)
+        Minv.y[1 , j] = inv((2 / dy^2 + 1 / 4dx^2) * (η[1, j-1] + η[1, j])
+                            + 1 / 4dx^2 * (η[2, j-1] + η[2, j])
+                            + 2 * γ / dy^2)
+        Minv.y[nx, j] = inv((2 / dy^2 + 1 / 4dx^2) * (η[nx, j-1] + η[nx, j])
+                            + 1 / 4dx^2 * (η[nx-1, j-1] + η[nx-1, j])
+                            + 2 * γ / dy^2)
     end
 
     ## Dirichlet boundary points, leave zero
-    return Minv
+
+    return nothing
     
 end
 
@@ -328,7 +339,7 @@ ninner=10000
 nouter=100
 ncheck=100
 
-outfields = linearStokes2D(n=127,
+outfields = linearStokes2D(n=n,
                            η_in=eta_inner, η_out=eta_outer, ρg_in=eta_outer,
                            niter_in=ninner, niter_out=nouter, ncheck=ncheck,
                            γ_factor=0.1,
