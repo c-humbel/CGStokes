@@ -205,6 +205,17 @@ function initialise_Minv(Minv, η, dx, dy, γ)
     
 end
 
+# compute energy norm (r^T M^-1 A r)
+# this should be monotonically decreasing in CG iteration
+function energy_norm(R_tmp, Ar, P, P_tmp, P_old, V, R, Minv, ρg, η, dx, dy, γ)
+    autodiff(Forward, compute_R!, DuplicatedNoNeed(R_tmp, Ar),
+             Duplicated(P, P_tmp), Const(P_old), Duplicated(V, R),
+             Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
+    return sqrt(dot(R.x, Ar.x) + dot(R.y, Ar.y))
+end
+
+
+
 
 function linearStokes2D(; n=127,
                         η_in=0.1, η_out=1., ρg_in=1.,
@@ -229,6 +240,7 @@ function linearStokes2D(; n=127,
     V      = (x=zeros(nx+1, ny), y=zeros(nx, ny+1))
     D      = (x=zeros(nx+1, ny), y=zeros(nx, ny+1))  # search direction of CG, cells affecting Dirichlet BC are zero
     R      = (x=zeros(nx+1, ny), y=zeros(nx, ny+1))  # Residuals of velocity PDE, cells affected by Dirichlet BC are zero
+    R_tmp  = (x=zeros(nx+1, ny), y=zeros(nx, ny+1)) 
     Ad     = (x=zeros(nx+1, ny), y=zeros(nx, ny+1))  # Jacobian of compute_R wrt. V, multiplied by search vector D
     Minv   = (x=zeros(nx+1, ny), y=zeros(nx, ny+1))  # preconditioner, cells correspoinding to Dirichlet BC are zero
     
@@ -265,7 +277,7 @@ function linearStokes2D(; n=127,
             update_D!(D, R, Minv, β)
 
             if it_in % ncheck == 0
-                err_in = (norm(R.x, 1) + norm(R.y, 1)) / (length(R.x) + length(R.y))
+                err_in = energy_norm(R_tmp, Ad, P, P_tmp, P_old, V, R, Minv, ρg, η, dx, dy, γ) / (length(R.x) + length(R.y))
                 push!(errs_in, err_in)
                 println("\t", it_in ," inner iterations: error = ", err_in)
             end
@@ -335,15 +347,15 @@ end
 eta_outer = 1e-4
 eta_inner = 1.
 n     = 127
-ninner=10000
-nouter=100
-ncheck=100
+ninner=1000
+nouter=1
+ncheck=10
 
 outfields = linearStokes2D(n=n,
                            η_in=eta_inner, η_out=eta_outer, ρg_in=eta_outer,
                            niter_in=ninner, niter_out=nouter, ncheck=ncheck,
                            γ_factor=0.1,
-                           max_err=1e-6)
+                           max_err=1e-9)
 
 create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, savefig=false)
 
