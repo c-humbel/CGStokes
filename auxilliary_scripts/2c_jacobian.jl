@@ -101,7 +101,7 @@ function compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
     return nothing
 end
 
-function construct_jacobian(n=5; seed=1)
+function construct_jacobian_with_boundary(n=5; seed=1)
     rng = Random.MersenneTwister(seed)
     nx, ny = n, n
     dx, dy = 1/nx, 1/ny
@@ -144,6 +144,57 @@ function construct_jacobian(n=5; seed=1)
             autodiff(Forward, compute_R!, DuplicatedNoNeed(R, colJ), Duplicated(P, P_tmp), Const(P_old), Duplicated(V, e), Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
             J[1:nxe, col] .= reshape(colJ.x, nxe)
             J[nxe+1:end, col] .= reshape(colJ.y, nye)
+            col += 1
+            e.y[i, j] = 0.0
+        end
+    end
+
+    return J
+end
+
+function construct_jacobian(n=5; seed=1)
+    rng = Random.MersenneTwister(seed)
+    nx, ny = n, n
+    dx, dy = 1/nx, 1/ny
+    γ      = 5.0
+    η      = rand(rng, nx, ny)
+    ρg     = zeros(nx, ny)
+    P      = zeros(nx, ny)
+    P_old  = zeros(nx, ny)
+    P_tmp  = zeros(nx, ny)
+    V      = (x = rand(nx+1, ny  ), y = rand(nx  , ny+1))
+    e      = (x =zeros(nx+1, ny  ), y =zeros(nx  , ny+1)) # basis vectors
+    R      = (x =zeros(nx+1, ny  ), y =zeros(nx  , ny+1)) 
+    colJ   = (x =zeros(nx+1, ny  ), y =zeros(nx  , ny+1)) # variable to store columns of the jacobian
+
+    nxe = (nx-1) * ny
+    nye = nx * (ny-1)
+    J   = zeros(nxe + nye, nxe + nye) 
+
+    col = 1
+    for j = 1:ny
+        for i = 2:nx
+            # set one entry in search vector to 1
+            e.x[i, j] = 1.0
+            # compute the jacobian column by multiplying it with a "basis vector"
+            autodiff(Forward, compute_R!, DuplicatedNoNeed(R, colJ), Duplicated(P, P_tmp), Const(P_old), Duplicated(V, e), Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
+            # store result in jacobian
+            # remove cells affected by Dirichlet BC ("ghost cells")
+            J[1:nxe, col]     .= reshape(colJ.x[2:nx, :], nxe)
+            J[nxe+1:end, col] .= reshape(colJ.y[:, 2:ny], nye)
+            # increase column count
+            col += 1
+            # reset search vector
+            e.x[i, j] = 0.0
+        end
+    end
+
+    for j = 2:ny
+        for i = 1:nx
+            e.y[i, j] = 1.0
+            autodiff(Forward, compute_R!, DuplicatedNoNeed(R, colJ), Duplicated(P, P_tmp), Const(P_old), Duplicated(V, e), Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
+            J[1:nxe, col]     .= reshape(colJ.x[2:nx, :], nxe)
+            J[nxe+1:end, col] .= reshape(colJ.y[:, 2:ny], nye)
             col += 1
             e.y[i, j] = 0.0
         end
@@ -207,20 +258,25 @@ function construct_M(n=5, seed=1)
     
 end
 
-## check that the jacobian is symmetric
-J = construct_jacobian();
+n = 5
 
-spJ = sparse(J)
+## check that the jacobian with BC is symmetric
+J = construct_jacobian_with_boundary(n);
 
-@assert issymmetric(spJ)
+@assert issymmetric(J)
+
+## check that the jacobian without BC is spd
+Jin = construct_jacobian(n);
+@assert issymmetric(Jin)
+@assert isposdef(Jin)
  
 ## check that the preconditioner is correct
-M = construct_M();
-m = vcat(reshape(M.x, length(M.x)), reshape(M.y, length(M.y)))
+M = construct_M(n);
+m = vcat(reshape(M.x, length(M.x)), reshape(M.y, length(M.y)));
 
 # reference values of the preconditioner
-mexact = diag(J)
-minv_exact = zeros(length(mexact))
-minv_exact[mexact .!= 0] = inv.(mexact[mexact .!= 0]) 
+mexact = diag(J);
+minv_exact = zeros(length(mexact));
+minv_exact[mexact .!= 0] = inv.(mexact[mexact .!= 0]);
 
 @assert all(m .≈ minv_exact)
