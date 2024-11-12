@@ -12,8 +12,9 @@ using Random
 # 3. Insead of having residuals from BC, apply them directly to the velocity field (supersedes point 2)
 # 4. split Neumann and Dirchlet BC: apply Dirichlet, and include Neumann in the residual (supersedes point 2,3)
 # 5. apply Dirichlet BC directly, and Neumann BC by imposing zero stress at the corresponding boundary
+# 6. negate the residual, required to ensure that A (i.e. -J) is s.p.d.
 function compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
-
+    nx, ny = size(P)
     nx, ny = size(P)
 
     ### Dirichlet boundary conditions
@@ -63,9 +64,9 @@ function compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
 
 
             # residual in x direction on the interface
-            R.x[i, j]  = (- (τxx_r - τxx_l) / dx
-                          - (τxy_t - τxy_b) / dy
-                          + (P[i, j] - P[i-1, j]) / dx)
+            R.x[i, j]  = ( (τxx_r - τxx_l) / dx
+                         + (τxy_t - τxy_b) / dy
+                         - (P[i, j] - P[i-1, j]) / dx)
         end
     end
 
@@ -92,12 +93,14 @@ function compute_R!(R, P, P_old, V, ρg, η, dx, dy, γ)
                 τxy_r = 0.  # zero stress at the right boundary
             end
             
-            R.y[i, j] = ( - (τyy_t - τyy_b) / dy
-                          - (τxy_r - τxy_l) / dx
-                          + ( P[i, j] -  P[i, j-1]) / dy
-                          - (ρg[i, j] + ρg[i, j-1]) * 0.5)
+            R.y[i, j] = ( (τyy_t - τyy_b) / dy
+                        + (τxy_r - τxy_l) / dx
+                        - ( P[i, j] -  P[i, j-1]) / dy
+                        + (ρg[i, j] + ρg[i, j-1]) * 0.5)
         end
     end
+
+    # Residuals corresponding to cells affected by Dirichlet BC are left zero
     return nothing
 end
 
@@ -268,14 +271,14 @@ J = construct_jacobian_with_boundary(n);
 ## check that the jacobian without BC is spd
 Jin = construct_jacobian(n);
 @assert issymmetric(Jin)
-@assert isposdef(Jin)
+@assert isposdef(-Jin)
  
 ## check that the preconditioner is correct
 M = construct_M(n);
 m = vcat(reshape(M.x, length(M.x)), reshape(M.y, length(M.y)));
 
 # reference values of the preconditioner
-mexact = diag(J);
+mexact = diag(-J);
 minv_exact = zeros(length(mexact));
 minv_exact[mexact .!= 0] = inv.(mexact[mexact .!= 0]);
 
