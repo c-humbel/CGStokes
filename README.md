@@ -101,7 +101,7 @@ $$
 
 This Lagrangian can be minimised iteratively, using some initial guess for $p$:
 
-> **while** not converged, **do**
+> **while** not converged **do**
 >
 >> solve $(T + \gamma G G^T) v = f + G p$
 >>

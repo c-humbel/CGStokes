@@ -334,7 +334,7 @@ function create_output_plot(P, V, R, errs_in, errs_out, conv_cg, itercounts, xs,
     nx = size(P, 1)
     fig = Figure(size=(800, 600))
     axs = (P=Axis(fig[1,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Pressure"),
-        err=Axis(fig[1,2][1,1], xlabel="Iterations / nx", title="Mean Absolute Residual (log)"),
+        err=Axis(fig[1,2][1,1], xlabel="Iterations / nx", title="Residual norm (log)"),
         Vy=Axis(fig[2,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity"),
         Ry=Axis(fig[2,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity Residual (log)"))
     # compute location of outer iteration errors
