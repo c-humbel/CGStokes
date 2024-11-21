@@ -3,14 +3,9 @@ using LinearAlgebra
 using Enzyme
 
 function tplNorm(x::NamedTuple, p::Real=2)
-    if p == Inf
-        return  maximum(norm.(values(x), Inf))
-    elseif p == -Inf
-        return  minimum(norm.(values(x), -Inf))
-    else # assume isfinite(p)
-        return sum(norm.(values(x), p).^p)^(1/p)
-    end
+    return norm(norm.(values(x), p), p)   
 end
+
 
 function tplDot(x::NamedTuple, y::NamedTuple, a::Union{NamedTuple, Real}=1.)
     if a isa NamedTuple
@@ -24,6 +19,7 @@ function tplDot(x::NamedTuple, y::NamedTuple, a::Union{NamedTuple, Real}=1.)
     end
 end
 
+
 function tplSet!(dest::NamedTuple, src::NamedTuple, a::Union{NamedTuple, Real}=1.)
     if a isa NamedTuple
         for k = keys(dest)
@@ -34,6 +30,7 @@ function tplSet!(dest::NamedTuple, src::NamedTuple, a::Union{NamedTuple, Real}=1
     end
     return nothing
 end
+
 
 function compute_divV!(divV, V, dx, dy)
     nx, ny = size(divV.c)
@@ -366,7 +363,7 @@ function linearStokes2D(; n=127,
                         η_in=0.1, η_out=1., ρg_in=1.,
                         niter_in=1000, niter_out=100, ncheck=100,
                         γ_factor=1.,
-                        ϵ_in=1e-3,ϵ_max=1e-6)
+                        ϵ_in=1e-3,ϵ_max=1e-5)
                         
     Lx = Ly = 10.
     R_in  = 1.
@@ -407,6 +404,7 @@ function linearStokes2D(; n=127,
     # visualisation
     res_out    = []
     res_in     = []
+    conv_in    = []
     itercounts = []
 
     # residual norms for monitoring convergence
@@ -419,7 +417,7 @@ function linearStokes2D(; n=127,
     it_out  = 1
     while it_out <= niter_out && (r_out > ϵ_max || r_in > ϵ_max)
         println("Iteration ", it_out)
-        tplSet!(P̄, P)
+        tplSet!(P₀, P)
 
         # inner loop, Conjugate Gradient
         
@@ -445,13 +443,14 @@ function linearStokes2D(; n=127,
             if it_in % ncheck == 0
                 δ = α * tplNorm(D, Inf)
                 println("\t", it_in, ": δ/r₀ = ", δ / r₀)
-                push!(res_in, δ / r₀)
-                if δ < ϵ_in * r₀ break end
+                push!(conv_in, δ / r₀)
+                if δ < min(ϵ_in, r_out) * r₀ break end
             end
         end
         push!(itercounts, it_in-1)
         
         r_in = tplNorm(R, Inf)
+        push!(res_in, r_in)
         compute_divV!(divV, V, dx, dy)
         r_out = tplNorm(divV, Inf)
         push!(res_out, r_out)
@@ -460,34 +459,35 @@ function linearStokes2D(; n=127,
         it_out += 1
     end
 
-    return P, V, R, res_in, res_out, itercounts, xc, yc
+    return P, V, R, res_in, res_out, conv_in, itercounts, xc, yc
 end
 
 
 # TODO: update for Arakawa grid
-function create_output_plot(P, V, R, errs_in, errs_out, itercounts, xs, ys; ncheck, η_ratio, savefig=false)
+function create_output_plot(P, V, R, errs_in, errs_out, conv_cg, itercounts, xs, ys; ncheck, η_ratio, savefig=false)
     dy = ys[2] - ys[1]
-    nx = size(P, 1)
+    nx = size(P.c, 1)
     fig = Figure(size=(800, 600))
     axs = (P=Axis(fig[1,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Pressure"),
-        err=Axis(fig[1,2][1,1], xlabel="Iterations / nx", title="Mean Absolute Residual (log)"),
+        err=Axis(fig[1,2][1,1], xlabel="Iterations / nx", title="Residual Norm (log)"),
         Vy=Axis(fig[2,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity"),
         Ry=Axis(fig[2,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity Residual (log)"))
     # compute location of outer iteration errors
     iters_out = cumsum(itercounts)
-    iters_in  = ncheck .* (1:length(errs_in))
-    scatter!(axs.err, iters_out ./ nx, log10.(errs_out), color=:blue, label="Pressure")
-    plt = (P=image!(axs.P, (xs[1], xs[end]), (ys[1], ys[end]), P, colormap=:inferno),
-           err=lines!(axs.err, iters_in ./ nx, log10.(errs_in), color=:red, label="Velocity"),
-           Vy=image!(axs.Vy, (xs[1], xs[end]), (ys[1]-dy/2, ys[end]+dy/2), V.y, colormap=:inferno),
-           Ry=image!(axs.Ry, (xs[2], xs[end-1]), (ys[1]+dy/2, ys[end]-dy/2), log10.(abs.(R.y)), colormap=:inferno))
+    iters_cg  = ncheck .* (1:length(conv_cg))
+    scatter!(axs.err, iters_out ./ nx, log10.(errs_out), color=:blue, marker=:circle, label="Pressure")
+    scatter!(axs.err, iters_out ./ nx, log10.(errs_in), color=:green, marker=:diamond, label="Velocity")
+    plt = (P=image!(axs.P, (xs[1], xs[end]), (ys[1], ys[end]), P.c, colormap=:inferno),
+           err=lines!(axs.err, iters_cg ./ nx, log10.(conv_cg), color=:red, label="CG"),
+           Vy=image!(axs.Vy, (xs[1], xs[end]), (ys[1]-dy/2, ys[end]+dy/2), V.yc, colormap=:inferno),
+           Ry=image!(axs.Ry, (xs[2], xs[end-1]), (ys[1]+dy/2, ys[end]-dy/2), log10.(abs.(R.yc)), colormap=:inferno))
     Colorbar(fig[1, 1][1, 2], plt.P)
     Colorbar(fig[2, 1][1, 2], plt.Vy)
     Colorbar(fig[2, 2][1, 2], plt.Ry)
     axislegend(axs.err, position=:lb)
 
     if savefig
-        save("2_output_$(η_ratio)_$(maximum(itercounts)).png", fig)
+        save("3_output_$(η_ratio)_$(maximum(itercounts)).png", fig)
     else
         display(fig)
     end
@@ -496,36 +496,35 @@ end
 
 
 
-function create_convergence_plot(errs_in, errs_out, itercounts; ncheck, η_ratio, nx, savefig=false)
+function create_convergence_plot(errs_in, errs_out, conv_cg, itercounts; ncheck, η_ratio, nx, savefig=false)
     fig = Figure()
-    ax = Axis(fig[1,1], xlabel="Iterations / nx", ylabel="log₁₀(Mean Abs. Residual)", title="η ratio=$η_ratio")
+    ax = Axis(fig[1,1], xlabel="Iterations / nx", ylabel="Residual norm (log)", title="η ratio=$η_ratio")
     iters_out = cumsum(itercounts)
-    iters_in  = ncheck .* (1:length(errs_in))
-    lines!(ax, iters_in ./ nx, log10.(errs_in), color=:red, label="Velocity")
-    scatter!(ax, iters_out ./ nx, log10.(errs_out), color=:blue, label="Pressure")
+    iters_cg  = ncheck .* (1:length(conv_cg))
+    lines!(ax, iters_cg ./ nx, log10.(conv_cg), color=:red, label="CG convergence")
+    scatter!(ax, iters_out ./ nx, log10.(errs_out), color=:blue, marker=:circle, label="Pressure")
+    scatter!(ax, iters_out ./ nx, log10.(errs_in), color=:green, marker=:diamond, label="Velocity")
     axislegend(ax, position=:rt)
     if savefig
-        save("2_convergence_$(η_ratio)_$(maximum(itercounts)).png", fig)
+        save("3_convergence_$(η_ratio)_$(maximum(itercounts)).png", fig)
     else
         display(fig)
     end
     return nothing
 end
 
-eta_outer = 1e-3
+eta_outer = 1e-6
 eta_inner = 1.
 n     = 127
-ninner=2000
-nouter=10
-ncheck=50
+ninner=10000
+nouter=100
+ncheck=100
 
 outfields = linearStokes2D(n=n,
                            η_in=eta_inner, η_out=eta_outer, ρg_in=eta_outer,
                            niter_in=ninner, niter_out=nouter, ncheck=ncheck,
-                           γ_factor=0.5,
-                           ϵ_in=1e-10,
-                           ϵ_max=1e-5);
+                           γ_factor=1., ϵ_in=1e-2, ϵ_max=1e-6);
 
-# create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, savefig=false)
+create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, savefig=false)
 
-create_convergence_plot(outfields[4:6]...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, nx=n, savefig=false)
+create_convergence_plot(outfields[4:7]...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, nx=n, savefig=false)
