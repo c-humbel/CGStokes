@@ -400,25 +400,6 @@ function create_output_plot(P, V, R, errs_in, errs_out, conv_cg, itercounts, xs,
 end
 
 
-
-function create_convergence_plot(errs_in, errs_out, conv_cg, itercounts; ncheck, η_ratio, nx, savefig=false)
-    fig = Figure()
-    ax = Axis(fig[1,1], xlabel="Iterations / nx", ylabel="Residual norm (log)", title="η ratio=$η_ratio")
-    iters_out = cumsum(itercounts)
-    iters_cg  = ncheck .* (1:length(conv_cg))
-    lines!(ax, iters_cg ./ nx, log10.(conv_cg), color=:red, label="CG conv.")
-    scatter!(ax, iters_out ./ nx, log10.(errs_out), color=:blue, marker=:circle, label="Pressure")
-    scatter!(ax, iters_out ./ nx, log10.(errs_in), color=:green, marker=:diamond, label="Velocity")
-    axislegend(ax, position=:rt)
-    if savefig
-        save("2_convergence_$(η_ratio)_$(maximum(itercounts)).png", fig)
-    else
-        display(fig)
-    end
-    return nothing
-end
-
-
 function cg_convergence_study(niter=1000)
     n = 127
     ncheck = 10
@@ -460,8 +441,5 @@ outfields = linearStokes2D(n=n,
                            ϵ_max=1e-6, 
                            verbose=true);
 
-create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, gamma=gamma, savefig=true)
+create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, gamma=gamma, savefig=false)
 
-create_convergence_plot(outfields[4:7]...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, nx=n, savefig=false)
-
-# cg_convergence_study(20000)

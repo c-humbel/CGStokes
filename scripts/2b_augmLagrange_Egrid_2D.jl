@@ -1,4 +1,5 @@
 using CairoMakie
+using ColorSchemes
 using LinearAlgebra
 using Enzyme
 
@@ -7,26 +8,37 @@ function tplNorm(x::NamedTuple, p::Real=2)
 end
 
 
-function tplDot(x::NamedTuple, y::NamedTuple, a::Union{NamedTuple, Real}=1.)
-    if a isa NamedTuple
-        s = 0.
-        for k = keys(x)
-            s += dot(x[k], a[k] .* y[k])
-        end
-        return return s
-    else
-        return sum(dot.(values(x), a .* values(y)))
+function tplDot(x::NamedTuple, y::NamedTuple, a::NamedTuple)
+    s = 0.
+    for k = keys(x)
+        s += dot(x[k], a[k] .* y[k])
     end
+    return s
 end
 
 
-function tplSet!(dest::NamedTuple, src::NamedTuple, a::Union{NamedTuple, Real}=1.)
-    if a isa NamedTuple
-        for k = keys(dest)
-            copyto!(dest[k], a[k] .* src[k])
-        end
-    else
-        copyto!.(values(dest), a .* values(src))
+function tplDot(x::NamedTuple, y::NamedTuple, a::Real=1.)
+    return sum(dot.(values(x), a .* values(y)))
+end
+
+
+function tplSet!(dest::NamedTuple, src::NamedTuple, a::NamedTuple)
+    for k = keys(dest)
+        copyto!(dest[k], a[k] .* src[k])
+    end
+    return nothing
+end
+
+
+function tplSet!(dest::NamedTuple, src::NamedTuple, a::Real=1.)
+    copyto!.(values(dest), a .* values(src))
+    return nothing
+end
+
+
+function tplScale!(x::NamedTuple, a::Real)
+    for k = keys(x)
+        x[k] .= a .* x[k]
     end
     return nothing
 end
@@ -359,35 +371,35 @@ function initialise_invM(invM, η, dx, dy, γ)
 end
 
 
-function linearStokes2D(; n=127,
+function linearStokes2D(;n=127,
                         η_in=0.1, η_out=1., ρg_in=1.,
-                        niter_in=1000, niter_out=100, ncheck=100,
+                        niter_in=10000, niter_out=100, ncheck=100,
                         γ_factor=1.,
-                        ϵ_in=1e-3,ϵ_max=1e-5)
-                        
-    Lx = Ly = 10.
-    R_in  = 1.
+                        ϵ_in=1e-3, ϵ_max=1e-6, verbose=false)
+    L_ref = 10. # reference length 
+    η_ref = max(η_in, η_out)
+    ρg_mag = min(1., η_out / η_in)
+    ρg_ref = ρg_in / ρg_mag
+    Lx = Ly = 1.
+    R_in  = 0.1
     nx = ny = n
 
     dx, dy = Lx / nx, Ly / ny
-    # coordinates of cell centers
     xc = LinRange(-0.5Lx + 0.5dx, 0.5Lx - 0.5dx, nx)
     yc = LinRange(-0.5Ly + 0.5dy, 0.5Ly - 0.5dy, ny)
-    # coordinates of cell corners (vertices)
     xv = LinRange(-0.5Lx, 0.5Lx, nx+1)
     yv = LinRange(-0.5Ly, 0.5Ly, ny+1)
 
     # field initialisation
-    η    = (c=[x^2 + y^2 < R_in^2 ? η_in  : η_out for x=xc, y=yc],
-            v=[x^2 + y^2 < R_in^2 ? η_in  : η_out for x=xv, y=yv])
-    ρg   = (c=[x^2 + y^2 < R_in^2 ? ρg_in : 0.    for x=xc, y=yc],
-            v=[x^2 + y^2 < R_in^2 ? ρg_in : 0.    for x=xv, y=yv])
+    η    = (c=[x^2 + y^2 < R_in^2 ? η_in / η_ref : η_out / η_ref for x=xc, y=yc],
+            v=[x^2 + y^2 < R_in^2 ? η_in / η_ref : η_out / η_ref for x=xv, y=yv]) 
+    ρg   = (c=[x^2 + y^2 < R_in^2 ? ρg_mag : 0. for x=xc, y=yc],
+            v=[x^2 + y^2 < R_in^2 ? ρg_mag : 0. for x=xv, y=yv])
     P    = (c=zeros(nx, ny), v=zeros(nx+1, ny+1))
     P₀   = deepcopy(P)  # old pressure
     P̄    = deepcopy(P)  # memory needed for auto-differentiation
-    divV = deepcopy(P)  # divergence of velocity
-    V    = (xc=zeros(nx+1, ny  ), yc=zeros(nx  , ny+1),
-            xv=zeros(nx+2, ny+1), yv=zeros(nx+1, ny+2))
+    divV = deepcopy(P)
+    V    = (xc=zeros(nx+1, ny), yc=zeros(nx, ny+1), xv=zeros(nx+2, ny+1), yv=zeros(nx+1, ny+2))
     V̄    = deepcopy(V)  # memory needed for auto-differentiation
     D    = deepcopy(V)  # search direction of CG, cells affecting Dirichlet BC are zero
     R    = deepcopy(V)  # Residuals of velocity PDE, cells affected by Dirichlet BC are zero
@@ -396,7 +408,7 @@ function linearStokes2D(; n=127,
     
     
     # Coefficient of augmented Lagrangian
-    γ = γ_factor*max(maximum(η.c), maximum(η.v))
+    γ = γ_factor # maximum(η), always one
 
     # preconditioner
     initialise_invM(invM, η, dx, dy, γ)
@@ -410,13 +422,12 @@ function linearStokes2D(; n=127,
     # residual norms for monitoring convergence
     r_out = Inf
     r_in  = Inf
-    r₀    = Inf
     δ     = Inf
 
     # outer loop, Powell Hestenes
     it_out  = 1
     while it_out <= niter_out && (r_out > ϵ_max || r_in > ϵ_max)
-        println("Iteration ", it_out)
+        verbose && println("Iteration ", it_out)
         tplSet!(P₀, P)
 
         # inner loop, Conjugate Gradient
@@ -426,7 +437,6 @@ function linearStokes2D(; n=127,
 
         tplSet!(D, R, invM)
         μ = tplDot(R, D)
-        r₀ = tplNorm(R, Inf)
         # start iteration
         it_in = 1
         while it_in <= niter_in
@@ -437,34 +447,45 @@ function linearStokes2D(; n=127,
             β = μ_new / μ
             μ = μ_new
             update_D!(D, R, invM, β)
-            
-            it_in += 1
 
-            if it_in % ncheck == 0
-                δ = α * tplNorm(D, Inf)
-                println("\t", it_in, ": δ/r₀ = ", δ / r₀)
-                push!(conv_in, δ / r₀)
-                if δ < min(ϵ_in, r_out) * r₀ break end
+            # check convergence
+            δ = α * tplNorm(D, Inf) / tplNorm(R, Inf)
+            if δ < min(ϵ_in, r_out)
+                it_in += 1
+                push!(conv_in, δ)
+                break
             end
+            if it_in % ncheck == 0
+                push!(conv_in, δ)
+            end
+            it_in += 1
         end
-        push!(itercounts, it_in-1)
-        
+        it_in -= 1
+        push!(itercounts, it_in)
+        verbose && println("finished after ", it_in, " iterations: ")
+
         r_in = tplNorm(R, Inf)
         push!(res_in, r_in)
+    
         compute_divV!(divV, V, dx, dy)
         r_out = tplNorm(divV, Inf)
         push!(res_out, r_out)
-        println("p-residual = ", r_out)
-        println("v-residual = ", r_in)
+
+        verbose && println("p-residual = ", r_out)
+        verbose && println("v-residual = ", r_in)
         it_out += 1
     end
 
-    return P, V, R, res_in, res_out, conv_in, itercounts, xc, yc
+    # scale output variables
+    tplScale!(P, ρg_ref * L_ref)
+    tplScale!(V, ρg_ref * L_ref^2 / η_ref)
+    tplScale!(R, ρg_ref)
+
+    return P, V, R, res_in, res_out, conv_in, itercounts, xc .* L_ref, yc .* L_ref
 end
 
 
-# TODO: update for Arakawa grid
-function create_output_plot(P, V, R, errs_in, errs_out, conv_cg, itercounts, xs, ys; ncheck, η_ratio, savefig=false)
+function create_output_plot(P, V, R, errs_in, errs_out, conv_cg, itercounts, xs, ys; ncheck, η_ratio, gamma, savefig=false)
     dy = ys[2] - ys[1]
     nx = size(P.c, 1)
     fig = Figure(size=(800, 600))
@@ -474,20 +495,35 @@ function create_output_plot(P, V, R, errs_in, errs_out, conv_cg, itercounts, xs,
         Ry=Axis(fig[2,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity Residual (log)"))
     # compute location of outer iteration errors
     iters_out = cumsum(itercounts)
-    iters_cg  = ncheck .* (1:length(conv_cg))
-    scatter!(axs.err, iters_out ./ nx, log10.(errs_out), color=:blue, marker=:circle, label="Pressure")
-    scatter!(axs.err, iters_out ./ nx, log10.(errs_in), color=:green, marker=:diamond, label="Velocity")
-    plt = (P=image!(axs.P, (xs[1], xs[end]), (ys[1], ys[end]), P.c, colormap=:inferno),
-           err=lines!(axs.err, iters_cg ./ nx, log10.(conv_cg), color=:red, label="CG"),
-           Vy=image!(axs.Vy, (xs[1], xs[end]), (ys[1]-dy/2, ys[end]+dy/2), V.yc, colormap=:inferno),
-           Ry=image!(axs.Ry, (xs[2], xs[end-1]), (ys[1]+dy/2, ys[end]-dy/2), log10.(abs.(R.yc)), colormap=:inferno))
+    # compute location of cg iteration errors
+    iters_cg  = []
+    cg_tot = ncheck
+    for it_tot = iters_out
+        while cg_tot < it_tot
+            push!(iters_cg, cg_tot)
+            cg_tot += ncheck
+        end
+        cg_tot = it_tot
+    end
+    push!(iters_cg, cg_tot)
+
+    colours = resample(ColorSchemes.viridis,7)[[2, 4, 6]]
+    pmax = maximum(abs.(P.c))
+    vmax = maximum(abs.(V.yc))
+
+    scatter!(axs.err, iters_out ./ nx, log10.(errs_out), color=colours[1], marker=:circle, label="Pressure")
+    scatter!(axs.err, iters_out ./ nx, log10.(errs_in), color=colours[2], marker=:diamond, label="Velocity")
+    plt = (P=image!(axs.P, (xs[1], xs[end]), (ys[1], ys[end]), P.c, colormap=:PRGn, colorrange=(-pmax, pmax)),
+           err=lines!(axs.err, iters_cg ./ nx, log10.(conv_cg), color=colours[3], label="CG"),
+           Vy=image!(axs.Vy, (xs[1], xs[end]), (ys[1]-dy/2, ys[end]+dy/2), V.yc, colormap=:PRGn, colorrange=(-vmax, vmax)),
+           Ry=image!(axs.Ry, (xs[2], xs[end-1]), (ys[1]+dy/2, ys[end]-dy/2), log10.(abs.(R.yc)), colormap=:viridis))
     Colorbar(fig[1, 1][1, 2], plt.P)
     Colorbar(fig[2, 1][1, 2], plt.Vy)
     Colorbar(fig[2, 2][1, 2], plt.Ry)
-    axislegend(axs.err, position=:lb)
+    Legend(fig[1, 2][2, 1], axs.err, orientation=:horizontal, framevisible=false, padding=(0, 0, 0, 0))
 
     if savefig
-        save("3_output_$(η_ratio)_$(maximum(itercounts)).png", fig)
+        save("2b_result_$(η_ratio)_$(gamma).png", fig)
     else
         display(fig)
     end
@@ -495,36 +531,20 @@ function create_output_plot(P, V, R, errs_in, errs_out, conv_cg, itercounts, xs,
 end
 
 
-
-function create_convergence_plot(errs_in, errs_out, conv_cg, itercounts; ncheck, η_ratio, nx, savefig=false)
-    fig = Figure()
-    ax = Axis(fig[1,1], xlabel="Iterations / nx", ylabel="Residual norm (log)", title="η ratio=$η_ratio")
-    iters_out = cumsum(itercounts)
-    iters_cg  = ncheck .* (1:length(conv_cg))
-    lines!(ax, iters_cg ./ nx, log10.(conv_cg), color=:red, label="CG convergence")
-    scatter!(ax, iters_out ./ nx, log10.(errs_out), color=:blue, marker=:circle, label="Pressure")
-    scatter!(ax, iters_out ./ nx, log10.(errs_in), color=:green, marker=:diamond, label="Velocity")
-    axislegend(ax, position=:rt)
-    if savefig
-        save("3_convergence_$(η_ratio)_$(maximum(itercounts)).png", fig)
-    else
-        display(fig)
-    end
-    return nothing
-end
-
-eta_outer = 1e-6
-eta_inner = 1.
+eta_outer = 1.
+eta_inner = 0.1
 n     = 127
 ninner=10000
 nouter=100
 ncheck=100
+gamma =20.
 
 outfields = linearStokes2D(n=n,
-                           η_in=eta_inner, η_out=eta_outer, ρg_in=eta_outer,
+                           η_in=eta_inner, η_out=eta_outer, ρg_in=-1.,
                            niter_in=ninner, niter_out=nouter, ncheck=ncheck,
-                           γ_factor=1., ϵ_in=1e-2, ϵ_max=1e-6);
+                           γ_factor=gamma,
+                           ϵ_in=1e-7,
+                           ϵ_max=1e-6, 
+                           verbose=true);
 
-create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, savefig=false)
-
-create_convergence_plot(outfields[4:7]...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, nx=n, savefig=false)
+create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, gamma=gamma, savefig=true)
