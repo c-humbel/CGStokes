@@ -141,7 +141,7 @@ function compute_R!(R, P, P₀, V, ρg, η, dx, dy, γ)
             R.y[i, j] = ( (τyy_t - τyy_b) / dy
                         + (τxy_r - τxy_l) / dx
                         - ( P[i, j] -  P[i, j-1]) / dy
-                        + (ρg[i, j] + ρg[i, j-1]) * 0.5)
+                        - (ρg[i, j] + ρg[i, j-1]) * 0.5)
         end
     end
 
@@ -245,25 +245,33 @@ end
 
 
 function linearStokes2D(; n=127,
-                        η_in=0.1, η_out=1., ρg_in=1.,
+                        η_ratio=0.1,
                         niter_in=1000, niter_out=100, ncheck=100,
                         γ_factor=1.,
                         ϵ_in=1e-3,ϵ_max=1e-6, verbose=false)
-    L_ref = 10. # reference length 
-    η_ref = max(η_in, η_out)
-    ρg_mag = min(1., η_out / η_in)
-    ρg_ref = ρg_in / ρg_mag
-    Lx = Ly = 1.
-    R_in  = 0.1
+    η_avg  = 1. # -> Pa s
+    ρg_avg = 1. # -> Pa / m
+    Lx     = 1. # -> m
+
     nx = ny = n
+    R_in    = 0.1 * Lx
+    Ly      = Lx
 
     dx, dy = Lx / nx, Ly / ny
     xs = LinRange(-0.5Lx + 0.5dx, 0.5Lx - 0.5dx, nx)
     ys = LinRange(-0.5Ly + 0.5dy, 0.5Ly - 0.5dy, ny)
 
+    # compute viscosities
+    A_in  = π * R_in^2
+    A_tot = Lx * Ly
+    η_out = η_avg * A_tot / (A_tot + (η_ratio - 1)*A_in)
+    η_in  = η_out * η_ratio
+    # body force
+    Δρg   = ρg_avg * A_tot / A_in
+
     # field initialisation
-    η    = [x^2 + y^2 < R_in^2 ? η_in / η_ref : η_out / η_ref for x=xs, y=ys]  
-    ρg   = [x^2 + y^2 < R_in^2 ? ρg_mag : 0.    for x=xs, y=ys]
+    η    = [x^2 + y^2 < R_in^2 ? η_in : η_out for x=xs, y=ys]  
+    ρg   = [x^2 + y^2 < R_in^2 ? Δρg : 0. for x=xs, y=ys]
     P    = zeros(nx, ny)
     P₀   = zeros(nx, ny)  # old pressure
     P̄    = zeros(nx, ny)  # memory needed for auto-differentiation
@@ -277,7 +285,7 @@ function linearStokes2D(; n=127,
     
     
     # Coefficient of augmented Lagrangian
-    γ = γ_factor # maximum(η), always one
+    γ = γ_factor * max(η_in, η_out) # η_avg
 
     # preconditioner
     initialise_invM(invM, η, dx, dy, γ)
@@ -291,11 +299,14 @@ function linearStokes2D(; n=127,
     # residual norms for monitoring convergence
     r_out = Inf
     r_in  = Inf
-    δ     = Inf
+    dP    = Inf
+    normP = 0.
+    # TODO: define appropriate scale for pressure residual
+    δ_ref = norm(ρg, Inf)
 
     # outer loop, Powell Hestenes
     it_out  = 1
-    while it_out <= niter_out && (r_out > ϵ_max || r_in > ϵ_max)
+    while it_out <= niter_out && (dP > 1e-10 && dP > ϵ_max * normP)
         verbose && println("Iteration ", it_out)
         P₀ .= P
 
@@ -306,6 +317,10 @@ function linearStokes2D(; n=127,
 
         tplSet!(D, R, invM)
         μ = tplDot(R, D)
+        # δ = sqrt(μ) / δ_ref
+        δ = tplNorm(R, Inf) / δ_ref
+        # δ = tplNorm(D, Inf) / tplNorm(R, Inf)
+        push!(conv_in, δ)
         # start iteration
         it_in = 1
         while it_in <= niter_in
@@ -318,8 +333,10 @@ function linearStokes2D(; n=127,
             update_D!(D, R, invM, β)
 
             # check convergence
-            δ = α * tplNorm(D, Inf) / tplNorm(R, Inf)
-            if δ < min(ϵ_in, r_out)
+            # δ = α * tplNorm(D, Inf) / tplNorm(R, Inf)
+            # δ = sqrt(μ) / δ_ref
+            δ = tplNorm(R, Inf) / δ_ref
+            if δ < ϵ_in
                 it_in += 1
                 push!(conv_in, δ)
                 break
@@ -335,22 +352,21 @@ function linearStokes2D(; n=127,
 
         r_in = tplNorm(R, Inf)
         push!(res_in, r_in)
-    
         compute_divV!(divV, V, dx, dy)
+        # correction based termination
+        dP = norm(P - P₀, Inf)
+        normP = norm(P, Inf)
         r_out = norm(divV, Inf)
         push!(res_out, r_out)
 
-        verbose && println("p-residual = ", r_out)
-        verbose && println("v-residual = ", r_in)
+        if verbose
+            println("ΔP = ", dP, " , |P| = ", normP, ", ΔP / |P| = ", dP / normP)
+            println("|R| = ", r_in, ", |R| / |ρg| = ", r_in / δ_ref)
+        end
         it_out += 1
     end
 
-    # scale output variables
-    P.*= ρg_ref * L_ref
-    tplScale!(V, ρg_ref * L_ref^2 / η_ref)
-    tplScale!(R, ρg_ref)
-
-    return P, V, R, res_in, res_out, conv_in, itercounts, xs .* L_ref, ys .* L_ref
+    return P, V, R, res_in, res_out, conv_in, itercounts, xs, ys
 end
 
 
@@ -366,15 +382,15 @@ function create_output_plot(P, V, R, errs_in, errs_out, conv_cg, itercounts, xs,
     iters_out = cumsum(itercounts)
     # compute location of cg iteration errors
     iters_cg  = []
-    cg_tot = ncheck
+    cg_tot = 0
     for it_tot = iters_out
         while cg_tot < it_tot
             push!(iters_cg, cg_tot)
             cg_tot += ncheck
         end
         cg_tot = it_tot
+        push!(iters_cg, cg_tot)
     end
-    push!(iters_cg, cg_tot)
 
     colours = resample(ColorSchemes.viridis,7)[[2, 4, 6]]
     scatter!(axs.err, iters_out ./ nx, log10.(errs_out), color=colours[1], marker=:circle, label="Pressure")
@@ -402,9 +418,12 @@ end
 
 function cg_convergence_study(niter=1000)
     n = 127
-    ncheck = 10
-    fig = Figure(size=(800, 1200))
+    ncheck = 1
+    colours = resample(ColorSchemes.viridis,7)[[2, 4, 6]]
+    fig = Figure(size=(1000, 400))
     for (i, η_in) ∈ enumerate([1e-3, 0.1, 10, 1e3])
+        ax = Axis(fig[1, i], xlabel="Iterations / nx", ylabel="CG error norm (log)", title="η ratio=$η_in")
+
         for (j, γ) ∈ enumerate([0.1, 1., 10.])
             outfields = linearStokes2D(n=n,
                                        η_in=η_in, η_out=1., ρg_in=1.,
@@ -413,11 +432,16 @@ function cg_convergence_study(niter=1000)
                                        ϵ_in=1e-9,
                                        ϵ_max=1e-5,
                                        verbose=true)
-            ax = Axis(fig[i, j], xlabel="Iterations / nx", ylabel="CG error norm (log)", title="η ratio=$η_in, γ=$γ")
+            
             errs = log10.(outfields[6])
-            iters = ncheck .* (1:length(errs))
-            lines!(ax, iters ./ n, errs, color=:green)
+            itercount = outfields[7][1]
+            coords = [i for i in 0:ncheck:itercount]
+            if itercount % ncheck != 0
+                push!(coords, itercount)
+            end
+            lines!(ax, coords ./ n, errs, color=colours[j], label=γ)
         end
+        #axislegend(ax, position=:rt)
     end
     display(fig)
     save("2_cg_convergence.png", fig)
@@ -425,21 +449,21 @@ function cg_convergence_study(niter=1000)
 end
 
 
-eta_outer = 1.
-eta_inner = 0.1
+ratio = 1e-6
 n     = 127
-ninner=10000
-nouter=100
+ninner=20000
+nouter=10000
 ncheck=100
-gamma =20.
+gamma =10.
 
 outfields = linearStokes2D(n=n,
-                           η_in=eta_inner, η_out=eta_outer, ρg_in=-1.,
+                           η_ratio=ratio,
                            niter_in=ninner, niter_out=nouter, ncheck=ncheck,
                            γ_factor=gamma,
-                           ϵ_in=1e-7,
+                           ϵ_in=1e-6,
                            ϵ_max=1e-6, 
                            verbose=true);
 
-create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, gamma=gamma, savefig=false)
+create_output_plot(outfields...; ncheck=ncheck, η_ratio=ratio, gamma=gamma, savefig=false)
 
+#cg_convergence_study()
