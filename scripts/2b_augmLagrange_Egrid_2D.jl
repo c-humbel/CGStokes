@@ -180,7 +180,7 @@ function compute_R!(R, P, P₀, V, ρg, η, dx, dy, γ)
             R.yc[i, j] = ( (τyy_t - τyy_b) / dy
                          + (τxy_r - τxy_l) / dx
                          - ( P.c[i, j] -  P.c[i, j-1]) / dy
-                         + (ρg.c[i, j] + ρg.c[i, j-1]) * 0.5)
+                         - (ρg.c[i, j] + ρg.c[i, j-1]) * 0.5)
         end
     end
     ## for velocities associated with cell corners (V.yv)
