@@ -336,7 +336,7 @@ function linearStokes2D(; n=127,
             # δ = α * tplNorm(D, Inf) / tplNorm(R, Inf)
             # δ = sqrt(μ) / δ_ref
             δ = tplNorm(R, Inf) / δ_ref
-            if δ < ϵ_in
+            if δ < min(ϵ_in, max(dP / normP, ϵ_max))
                 it_in += 1
                 push!(conv_in, δ)
                 break
@@ -450,7 +450,7 @@ end
 
 
 ratio = 1e-6
-n     = 127
+n     = 63
 ninner=20000
 nouter=10000
 ncheck=100
@@ -460,7 +460,7 @@ outfields = linearStokes2D(n=n,
                            η_ratio=ratio,
                            niter_in=ninner, niter_out=nouter, ncheck=ncheck,
                            γ_factor=gamma,
-                           ϵ_in=1e-6,
+                           ϵ_in=1e-3,
                            ϵ_max=1e-6, 
                            verbose=true);
 
