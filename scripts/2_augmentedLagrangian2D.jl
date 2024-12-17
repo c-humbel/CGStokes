@@ -301,7 +301,6 @@ function linearStokes2D(; n=127,
     r_in  = Inf
     dP    = Inf
     normP = 0.
-    # TODO: define appropriate scale for pressure residual
     δ_ref = norm(ρg, Inf)
 
     # outer loop, Powell Hestenes
@@ -350,18 +349,22 @@ function linearStokes2D(; n=127,
         push!(itercounts, it_in)
         verbose && println("finished after ", it_in, " iterations: ")
 
-        r_in = tplNorm(R, Inf)
-        push!(res_in, r_in)
-        compute_divV!(divV, V, dx, dy)
         # correction based termination
         dP = norm(P - P₀, Inf)
         normP = norm(P, Inf)
-        r_out = norm(divV, Inf)
+
+        # record residuals
+        r_in = tplNorm(R, Inf) / tplNorm(V, Inf)
+        push!(res_in, r_in)
+        compute_divV!(divV, V, dx, dy)
+        r_out = norm(divV, Inf) / normP
         push!(res_out, r_out)
+       
 
         if verbose
-            println("ΔP = ", dP, " , |P| = ", normP, ", ΔP / |P| = ", dP / normP)
-            println("|R| = ", r_in, ", |R| / |ρg| = ", r_in / δ_ref)
+            println("ΔP = ", dP, ", ΔP / |P| = ", dP / normP)
+            println("δ  = ", δ)
+            println("|Rₚ| / |P| = ", r_in, ", |Rᵥ| / |V| = ", r_in)
         end
         it_out += 1
     end
@@ -449,12 +452,12 @@ function cg_convergence_study(niter=1000)
 end
 
 
-ratio = 1e-6
-n     = 63
-ninner=20000
-nouter=10000
-ncheck=100
-gamma =10.
+ratio = 1e6
+n     = 127
+ninner=2*n*n
+nouter=10*n
+ncheck=n
+gamma =.05
 
 outfields = linearStokes2D(n=n,
                            η_ratio=ratio,
