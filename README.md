@@ -38,6 +38,7 @@ We start from the stokes equation
 ```
 
 Which we solve on the domain $\Omega = [-L, L]^2$, equipped with boundary conditions
+
 ```math
 V_x(x=\pm L) = 0 \\
 V_y(y=\pm L) = 0 \\
@@ -134,21 +135,28 @@ The matrix $A$ is symmetric only if boundary conditions are carefully handled. F
 
 In the form written above, $A$ appears to be negative definite, since the jacobian of $b - Av$ is s.p.d. To successfully apply the CG method, the whole equation has to be negated.
 
-In the following figure we show the result on the center values obtained from the miniapp setting. When using the vertex values, they look identical. For the residuals of the  velocity and pressure equations, the infinity norm is used. Convergence of the CG method is monitored via $\frac{||\alpha d_i||_\infty}{||r||_\infty}$.
+In the following figure we show the result on the center values obtained from the miniapp setting. When using the vertex values, they look identical. For the relative residuals of the  velocity and pressure equations, the infinity norm is used. Convergence of the CG method is monitored via $\frac{||R||_\infty}{||\rho g||_\infty}$.
 
-![Result for the setting of the miniapp](figures/2_result_miniapp_gamma20.png)
+![Result for the setting of the miniapp](figures/2_output_miniapp_10.png)
 
-The simulation was run using $127^2$ grid cells (as in step 1) without early stopping of the conjugate gradient iteration, a tolerance of $10^{-6}$ for Powell-Hestenes and $10^{-7}$ for CG, and a $\gamma$-factor of $20$.
+The simulation was run using $127^2$ grid cells (as in step 1) with early stopping of the conjugate gradient iteration, a tolerance of $10^{-6}$, and a $\gamma$-factor of $10$.
 
-If we change to a strong inclusion ($\eta_{in} > \eta_{out}$) the algorithm requires more time to converge. For a similar setting as above, but with $\frac{\eta_{in}}{\eta_{out}} = 10^6$, we find the best iteration count of just a bit more than $200\,\mathrm{n_x}$ for $\gamma = 10^{-4}$.
+If we change to a strong inclusion ($\eta_{in} > \eta_{out}$) the algorithm requires more time to converge. For a similar setting as above, but with $\frac{\eta_{in}}{\eta_{out}} = 10^6$, we find the best iteration count of just a bit more than $500\,\mathrm{n_x}$ for $\gamma = 0.02$.
 
-![Result for strong inclusion (viscosity ration 1e6)](figures/2_result_plus6_minus4.png)
+![Result for strong inclusion (viscosity ration 1e6)](figures/2_output_plus6_pt02.png)
 
 
-**Note**: some parameters have to be chosen: the parameter $\gamma$ is probably the most obvious, it controls the "step size" of the method. Large $\gamma$ is expected to lead to fewer, but more expensive outer iterations. But we also need to set minimal requirement for early stopping. If we evaluate the CG convergence condition often (less than every 100 iterations), early stopping at $10^{-3}$ is not sufficient for overall convergence in the weak inclusion, however it seems to work for strong inclusion. In reality, how often we evaluate the convergence condition for CG is itself a parameter that can influence the result, since we may do additonal iterations that are not required by the error bound, but may improve the intermediate result we get at the end of the inner iteration.
+**Note**: some parameters have to be chosen: the parameter $\gamma$ is probably the most obvious, it controls the "step size" of the method. Large $\gamma$ is expected to lead to fewer, but more expensive outer iterations. But we also need to set minimal requirement for early stopping. We observed good results with $\epsilon_{min} = 10^{-3}$
 
 
 #### Transfering to Arakawa E-Grid
 In preparation for the nonlinear case, the code is ported to work on an Arakawa E-grid. This type of staggered grid keeps values for scalar fields at both the centers and the corners of computational cells. Fluxes are stored at all interfaces. In our case, the scalar fields are viscosity and pressure, while the velocity components represent fluxes. Compared to the staggered grid used in steps 1 and 2, the E-grid requires double the amount of memory. In the code, I keep two different arrays for data associated to cell "centers" and "vertices".
 
 In the linear case, we are essentially solving the same problem on two grids simultaneously, since center and vertex values are coupled only via viscosity. 
+
+
+### Step 3:: Applying CG to the full system
+
+Instead of separating the pressure and velocity update as in the augmented lagrangian approach, we can try to solve the discretized system directly using a conjugate gradient method.
+
+From the equation we know that the system will not be s.p.d., as it does not have full rank. Constructing the system matrix for boundary conditions as for the inclusion setting (closed box with free slip), but for randomly chosen viscosity, shows that it is symmetric, but indefinite. The matrix $-T$ discretizing $- \nabla \cdot \tau$ is s.p.d. The gradient discretization $G$ is rank defficient, which is expected since pressure is only defined up to a constant.

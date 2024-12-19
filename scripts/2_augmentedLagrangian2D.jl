@@ -261,6 +261,7 @@ function linearStokes2D(; n=127,
     xs = LinRange(-0.5Lx + 0.5dx, 0.5Lx - 0.5dx, nx)
     ys = LinRange(-0.5Ly + 0.5dy, 0.5Ly - 0.5dy, ny)
 
+
     # compute viscosities
     A_in  = π * R_in^2
     A_tot = Lx * Ly
@@ -295,6 +296,7 @@ function linearStokes2D(; n=127,
     res_in     = []
     conv_in    = []
     itercounts = []
+    cg_count   = [1]
 
     # residual norms for monitoring convergence
     r_out = Inf
@@ -320,6 +322,7 @@ function linearStokes2D(; n=127,
         δ = tplNorm(R, Inf) / δ_ref
         # δ = tplNorm(D, Inf) / tplNorm(R, Inf)
         push!(conv_in, δ)
+        if it_out > 1 push!(cg_count, cg_count[end]) end
         # start iteration
         it_in = 1
         while it_in <= niter_in
@@ -336,18 +339,21 @@ function linearStokes2D(; n=127,
             # δ = sqrt(μ) / δ_ref
             δ = tplNorm(R, Inf) / δ_ref
             if δ < min(ϵ_in, max(dP / normP, ϵ_max))
-                it_in += 1
                 push!(conv_in, δ)
+                push!(cg_count, cg_count[end] + (it_in % ncheck))
+                it_in += 1
                 break
             end
             if it_in % ncheck == 0
                 push!(conv_in, δ)
+                push!(cg_count, cg_count[end] + ncheck)
             end
             it_in += 1
         end
         it_in -= 1
         push!(itercounts, it_in)
         verbose && println("finished after ", it_in, " iterations: ")
+        it_in == niter_in && println("CG did not reach prescribed accuracy (", δ," > ", min(ϵ_in, max(dP / normP, ϵ_max)) , ")")
 
         # correction based termination
         dP = norm(P - P₀, Inf)
@@ -365,6 +371,30 @@ function linearStokes2D(; n=127,
             println("ΔP = ", dP, ", ΔP / |P| = ", dP / normP)
             println("δ  = ", δ)
             println("|Rₚ| / |P| = ", r_in, ", |Rᵥ| / |V| = ", r_in)
+
+            ph_count = cumsum(itercounts)
+
+            fig = Figure(size=(800, 900))
+            colours = resample(ColorSchemes.viridis,7)[[2, 4, 6]]
+            axs = (P=Axis(fig[1,1][1,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Pressure"),
+                    Rp=Axis(fig[1,1][1,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Pressure Residual"),
+                    Vy=Axis(fig[2,1][1,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity"),
+                    Ry=Axis(fig[2,1][1,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity Residual"),
+                    conv=Axis(fig[3,1], xlabel="iter / nx", ylabel="log error", title="Convergence behaviour"))
+            plt = (P=image!(axs.P, (xs[1], xs[end]), (ys[1], ys[end]), P, colormap=:PRGn, colorrange=(-maximum(P), maximum(P))),
+                    Rp=image!(axs.Rp, (xs[1], xs[end]), (ys[1], ys[end]), divV,  colormap=:viridis),
+                    Vy=image!(axs.Vy, (xs[1], xs[end]), (ys[1]-dy/2, ys[end]+dy/2), V.y, colormap=:PRGn, colorrange=(-maximum(V.y), maximum(V.y))),
+                    Ry=image!(axs.Ry, (xs[2], xs[end-1]), (ys[1]+dy/2, ys[end]-dy/2), R.y, colormap=:viridis),
+                    conv=lines!(axs.conv, cg_count ./ nx, log10.(conv_in), color=colours[3], label="max(Rv)/max(ρg)"))
+            scatter!(axs.conv, ph_count ./ nx, log10.(res_out), color=colours[1], marker=:circle, label="Pressure")
+            scatter!(axs.conv, ph_count ./ nx, log10.(res_in), color=colours[2], marker=:diamond, label="Velocity")
+            
+        Colorbar(fig[1, 1][1, 1][1, 2], plt.P)
+        Colorbar(fig[1, 1][1, 2][1, 2], plt.Rp)
+        Colorbar(fig[2, 1][1, 1][1, 2], plt.Vy)
+        Colorbar(fig[2, 1][1, 2][1, 2], plt.Ry)
+        axislegend(axs.conv, position=:lb)
+        display(fig)
         end
         it_out += 1
     end
@@ -378,7 +408,7 @@ function create_output_plot(P, V, R, errs_in, errs_out, conv_cg, itercounts, xs,
     nx = size(P, 1)
     fig = Figure(size=(800, 600))
     axs = (P=Axis(fig[1,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Pressure"),
-        err=Axis(fig[1,2][1,1], xlabel="Iterations / nx", title="Nondimensional Residual (log)"),
+        err=Axis(fig[1,2][1,1], xlabel="Iterations / nx", title="Relative Residuals (log)"),
         Vy=Axis(fig[2,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity"),
         Ry=Axis(fig[2,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity Residual (log)"))
     # compute location of outer iteration errors
@@ -419,45 +449,12 @@ function create_output_plot(P, V, R, errs_in, errs_out, conv_cg, itercounts, xs,
 end
 
 
-function cg_convergence_study(niter=1000)
-    n = 127
-    ncheck = 1
-    colours = resample(ColorSchemes.viridis,7)[[2, 4, 6]]
-    fig = Figure(size=(1000, 400))
-    for (i, η_in) ∈ enumerate([1e-3, 0.1, 10, 1e3])
-        ax = Axis(fig[1, i], xlabel="Iterations / nx", ylabel="CG error norm (log)", title="η ratio=$η_in")
-
-        for (j, γ) ∈ enumerate([0.1, 1., 10.])
-            outfields = linearStokes2D(n=n,
-                                       η_in=η_in, η_out=1., ρg_in=1.,
-                                       niter_in=niter, niter_out=1, ncheck=ncheck,
-                                       γ_factor=γ,
-                                       ϵ_in=1e-9,
-                                       ϵ_max=1e-5,
-                                       verbose=true)
-            
-            errs = log10.(outfields[6])
-            itercount = outfields[7][1]
-            coords = [i for i in 0:ncheck:itercount]
-            if itercount % ncheck != 0
-                push!(coords, itercount)
-            end
-            lines!(ax, coords ./ n, errs, color=colours[j], label=γ)
-        end
-        #axislegend(ax, position=:rt)
-    end
-    display(fig)
-    save("2_cg_convergence.png", fig)
-    return nothing
-end
-
-
-ratio = 1e6
+ratio = 0.1
 n     = 127
 ninner=2*n*n
 nouter=10*n
 ncheck=n
-gamma =.05
+gamma =10.
 
 outfields = linearStokes2D(n=n,
                            η_ratio=ratio,
@@ -465,8 +462,6 @@ outfields = linearStokes2D(n=n,
                            γ_factor=gamma,
                            ϵ_in=1e-3,
                            ϵ_max=1e-6, 
-                           verbose=true);
+                           verbose=false);
 
-create_output_plot(outfields...; ncheck=ncheck, η_ratio=ratio, gamma=gamma, savefig=false)
-
-#cg_convergence_study()
+create_output_plot(outfields...; ncheck=ncheck, η_ratio=ratio, gamma=gamma, savefig=true)

@@ -312,7 +312,7 @@ function create_output_plot(P, V, R, residuals, itercount, xs, ys; ncheck, η_ra
     nx = size(P, 1)
     fig = Figure(size=(800, 600))
     axs = (P=Axis(fig[1,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Pressure"),
-        err=Axis(fig[1,2][1,1], xlabel="Iterations / nx", title="Nondimensional CG Convergence (log)"),
+        err=Axis(fig[1,2][1,1], xlabel="Iterations / nx", title="CG Convergence (log)"),
         Vy=Axis(fig[2,1][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity"),
         Ry=Axis(fig[2,2][1,1], aspect=1, xlabel="x", ylabel="y", title="Vertical Velocity Residual (log)"))
     # compute location of cg iteration errors
@@ -333,7 +333,7 @@ function create_output_plot(P, V, R, residuals, itercount, xs, ys; ncheck, η_ra
     Colorbar(fig[2, 2][1, 2], plt.Ry)
 
     if savefig
-        save("4_output_$(η_ratio).png", fig)
+        save("3_output_$(η_ratio).png", fig)
     else
         display(fig)
     end
@@ -343,7 +343,7 @@ end
 
 
 eta_outer = 1.
-eta_inner = 1e6
+eta_inner = 0.1
 n     = 127
 niter = 100000
 ncheck=100
@@ -353,5 +353,5 @@ outfields = linearStokes2D(n=n,
                            maxiter=niter, ncheck=ncheck,
                            ϵ_max=1e-6);
 
-create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, savefig=false)
+create_output_plot(outfields...; ncheck=ncheck, η_ratio=eta_inner/eta_outer, savefig=true)
 
