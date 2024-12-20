@@ -31,27 +31,33 @@ The method of conjugate gradients solves the linear system $Ax = b$ iteratively 
 In this step, a non-accellerated pseudo-transient (PT) solver is used to solve the linear Stokes equation in two dimensions. The code follows the example miniapp in *ParallelStencil.jl* (PS). The main algorithmic change is that we compute the pseudo time step using the maximum viscosity of the neighbouring cells, instead of taking the average. This allows convergence even for large relative differences in viscosity.
 
 We start from the stokes equation
-```math
-\nabla \cdot \tau - \nabla p + \rho g = 0 \\
-\nabla \cdot V = 0 \\
-\text{where} \tau = 2\eta \left( \frac{1}{2} \left( \nabla V + \nabla V^T \right) \right)
-```
+$$
+\nabla \cdot \tau - \nabla p + \rho g = 0, \quad
+\nabla \cdot V = 0
+$$
+$$
+\text{where} \quad \tau = 2\eta \left( \frac{1}{2} \left( \nabla V + \nabla V^T \right) \right)
+$$
 
 Which we solve on the domain $\Omega = [-L, L]^2$, equipped with boundary conditions
 
-```math
-V_x(x=\pm L) = 0 \\
-V_y(y=\pm L) = 0 \\
-\left.\frac{\partial V_x}{\partial y} \right|_{y=\pm L}  = 0 \\
-\left.\frac{\partial V_y}{\partial x} \right|_{x=\pm L} = 0 \\
-``` 
+$$
+V_x(x=\pm L) = 0,  \quad
+V_y(y=\pm L) = 0
+$$
+$$
+\left.\frac{\partial V_x}{\partial y} \right|_{y=\pm L}  = 0, \quad
+\left.\frac{\partial V_y}{\partial x} \right|_{x=\pm L} = 0
+$$ 
 
 And augment the equation with derivatives in dual time $\theta$:
 
-```math
-\tilde \rho \frac{\partial V}{\partial \theta} = -\nabla p + \nabla \cdot \tau + \rho g \\
+$$
+\tilde \rho \frac{\partial V}{\partial \theta} = -\nabla p + \nabla \cdot \tau + \rho g
+$$
+$$
 \frac{1}{\tilde \kappa} \frac{\partial p}{\partial \theta} = \nabla V
-```
+$$
 
 This system is evolved in dual time until the derivatives become zero, which means that the variables solve the original equations. 
 
@@ -149,13 +155,13 @@ If we change to a strong inclusion ($\eta_{in} > \eta_{out}$) the algorithm requ
 **Note**: some parameters have to be chosen: the parameter $\gamma$ is probably the most obvious, it controls the "step size" of the method. Large $\gamma$ is expected to lead to fewer, but more expensive outer iterations. But we also need to set minimal requirement for early stopping. We observed good results with $\epsilon_{min} = 10^{-3}$
 
 
-#### Transfering to Arakawa E-Grid
+#### Transferring to Arakawa E-Grid
 In preparation for the nonlinear case, the code is ported to work on an Arakawa E-grid. This type of staggered grid keeps values for scalar fields at both the centers and the corners of computational cells. Fluxes are stored at all interfaces. In our case, the scalar fields are viscosity and pressure, while the velocity components represent fluxes. Compared to the staggered grid used in steps 1 and 2, the E-grid requires double the amount of memory. In the code, I keep two different arrays for data associated to cell "centers" and "vertices".
 
 In the linear case, we are essentially solving the same problem on two grids simultaneously, since center and vertex values are coupled only via viscosity. 
 
 
-### Step 3:: Applying CG to the full system
+### Step 3: Applying CG to the full system
 
 Instead of separating the pressure and velocity update as in the augmented lagrangian approach, we can try to solve the discretized system directly using a conjugate gradient method.
 
