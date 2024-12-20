@@ -19,12 +19,14 @@ most recent configuration:
 
 * report relative residuals for both pressure and velocity
 
-also tried other error metrics:
+
+tried other error metrics:
 * relative residual also in outer loop $\frac{||\nabla \cdot V||_{\infty}}{||P||_{\infty}}$: can stall at some point
 * relative change in CG: $\frac{||\alpha D_i||_{\infty}}{||R||_{\infty}}$: couln't work out how to detect convergence reliably
 * scaled "preconditioned" residual in CG: $\frac{\sqrt{r^T M^{-1} r}}{||\rho g||_{2}}$: does not show convergence for high viscosities
 
-*What I also thouht I could try:*
+
+*What I also thought I could try:*
 * use relative change for CG the same way as in outer loop , i.e. monitor $\frac{||\alpha D||_{\infty}}{||V||_{\infty}}$
 * adapt the value of $\gamma$ during the iteration
 
@@ -42,7 +44,8 @@ uses $\gamma = 10$, initial tolerance for CG $\epsilon_{min} = 10^{-3}$
 with $\frac{\eta_{in}}{}\eta_{out} = 10^6$
 
 * requires many iterations to converge
-* early termination "necessary" for first CG solve 
+* early termination "necessary" for first CG solve
+* plots look the same for different reference values for $\rho g$ and $\eta$, except for relative pressure residual
 
 ## Coupled Conjugate Gradient Method
 
@@ -68,7 +71,16 @@ directly with CG. As the matrix is not s.p.d., I think there are no convergence 
 
 ![](../figures/3_output_miniapp.png)
 
-*current state*
+**current state**
 * only a sub-optimal preconditioner implemented
 * non-dimensionalisation is not handled correctly (e.g. convergence assessed using absolute tolerance $\sqrt{r^T M^{-1} r} < \epsilon$)
 * converges for strong inclusions up to $10^3$ (requiring ca. $200 n_x$ iterations) 
+
+## Next Steps
+
+* Try replacing relative update in pressure loop with properly scaled residual (i.e. using time scale)
+* Perform parametric study for optimal $\gamma$ depending on $\eta$-ratio, using randomly distributed circular inclusions
+* Implement augmented Lagrangian for nonlinear (power law) viscosity
+  * check derivation via Energy formulation (Schoof, 2006)
+  * Newton Iteration only for velocity, i.e. can be performed in the outer loop
+  * should be able to use same preconditioner 
