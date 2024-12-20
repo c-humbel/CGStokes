@@ -248,7 +248,8 @@ function linearStokes2D(; n=127,
                         η_ratio=0.1,
                         niter_in=1000, niter_out=100, ncheck=100,
                         γ_factor=1.,
-                        ϵ_in=1e-3,ϵ_max=1e-6, verbose=false)
+                        ϵ_in=1e-3,ϵ_max=1e-6,
+                        verbose=false, do_vis=false)
     η_avg  = 1. # -> Pa s
     ρg_avg = 1. # -> Pa / m
     Lx     = 1. # -> m
@@ -299,15 +300,13 @@ function linearStokes2D(; n=127,
     cg_count   = [1]
 
     # residual norms for monitoring convergence
-    r_out = Inf
-    r_in  = Inf
-    dP    = Inf
-    normP = 0.
+    ω     = Inf
+    ω_ref = ρg_avg * Lx / η_avg
     δ_ref = norm(ρg, Inf)
 
     # outer loop, Powell Hestenes
     it_out  = 1
-    while it_out <= niter_out && (dP > 1e-10 && dP > ϵ_max * normP)
+    while it_out <= niter_out && (ω > ϵ_max)
         verbose && println("Iteration ", it_out)
         P₀ .= P
 
@@ -338,7 +337,7 @@ function linearStokes2D(; n=127,
             # δ = α * tplNorm(D, Inf) / tplNorm(R, Inf)
             # δ = sqrt(μ) / δ_ref
             δ = tplNorm(R, Inf) / δ_ref
-            if δ < min(ϵ_in, max(dP / normP, ϵ_max))
+            if δ < min(ϵ_in, max(ω, ϵ_max))
                 push!(conv_in, δ)
                 push!(cg_count, cg_count[end] + (it_in % ncheck))
                 it_in += 1
@@ -355,23 +354,18 @@ function linearStokes2D(; n=127,
         verbose && println("finished after ", it_in, " iterations: ")
         it_in == niter_in && println("CG did not reach prescribed accuracy (", δ," > ", min(ϵ_in, max(dP / normP, ϵ_max)) , ")")
 
-        # correction based termination
-        dP = norm(P - P₀, Inf)
-        normP = norm(P, Inf)
+        # residual based termination
+        compute_divV!(divV, V, dx, dy)
+        ω = norm(divV, Inf) / ω_ref
 
         # record residuals
-        r_in = tplNorm(R, Inf) / tplNorm(V, Inf)
-        push!(res_in, r_in)
-        compute_divV!(divV, V, dx, dy)
-        r_out = norm(divV, Inf) / normP
-        push!(res_out, r_out)
-       
+        push!(res_in, δ)
+        push!(res_out, ω)
 
         if verbose
-            println("ΔP = ", dP, ", ΔP / |P| = ", dP / normP)
-            println("δ  = ", δ)
-            println("|Rₚ| / |P| = ", r_in, ", |Rᵥ| / |V| = ", r_in)
-
+            println("ω = ", ω, ", δ  = ", δ)
+        end
+        if do_vis
             ph_count = cumsum(itercounts)
 
             fig = Figure(size=(800, 900))
@@ -389,15 +383,16 @@ function linearStokes2D(; n=127,
             scatter!(axs.conv, ph_count ./ nx, log10.(res_out), color=colours[1], marker=:circle, label="Pressure")
             scatter!(axs.conv, ph_count ./ nx, log10.(res_in), color=colours[2], marker=:diamond, label="Velocity")
             
-        Colorbar(fig[1, 1][1, 1][1, 2], plt.P)
-        Colorbar(fig[1, 1][1, 2][1, 2], plt.Rp)
-        Colorbar(fig[2, 1][1, 1][1, 2], plt.Vy)
-        Colorbar(fig[2, 1][1, 2][1, 2], plt.Ry)
-        axislegend(axs.conv, position=:lb)
-        display(fig)
+            Colorbar(fig[1, 1][1, 1][1, 2], plt.P)
+            Colorbar(fig[1, 1][1, 2][1, 2], plt.Rp)
+            Colorbar(fig[2, 1][1, 1][1, 2], plt.Vy)
+            Colorbar(fig[2, 1][1, 2][1, 2], plt.Ry)
+            axislegend(axs.conv, position=:lb)
+            display(fig)
         end
         it_out += 1
     end
+    it_out >= niter_out && println("Iteration did not reach required accuracy (", dP / normP ," > ", ϵ_max , ")")
 
     return P, V, R, res_in, res_out, conv_in, itercounts, xs, ys
 end
@@ -449,12 +444,12 @@ function create_output_plot(P, V, R, errs_in, errs_out, conv_cg, itercounts, xs,
 end
 
 
-ratio = 0.1
-n     = 127
+ratio = 1e3
+n     = 64
 ninner=2*n*n
 nouter=10*n
 ncheck=n
-gamma =10.
+gamma =5.
 
 outfields = linearStokes2D(n=n,
                            η_ratio=ratio,
@@ -462,6 +457,7 @@ outfields = linearStokes2D(n=n,
                            γ_factor=gamma,
                            ϵ_in=1e-3,
                            ϵ_max=1e-6, 
-                           verbose=false);
+                           verbose=true);
 
-create_output_plot(outfields...; ncheck=ncheck, η_ratio=ratio, gamma=gamma, savefig=true)
+create_output_plot(outfields...; ncheck=ncheck, η_ratio=ratio, gamma=gamma, savefig=false)
+
