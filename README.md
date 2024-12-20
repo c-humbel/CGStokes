@@ -31,24 +31,24 @@ The method of conjugate gradients solves the linear system $Ax = b$ iteratively 
 In this step, a non-accellerated pseudo-transient (PT) solver is used to solve the linear Stokes equation in two dimensions. The code follows the example miniapp in *ParallelStencil.jl* (PS). The main algorithmic change is that we compute the pseudo time step using the maximum viscosity of the neighbouring cells, instead of taking the average. This allows convergence even for large relative differences in viscosity.
 
 We start from the stokes equation
-$$
+```math
 \nabla \cdot \tau - \nabla p + \rho g = 0, \quad
 \nabla \cdot V = 0
-$$
-$$
+```
+```math
 \text{where} \quad \tau = 2\eta \left( \frac{1}{2} \left( \nabla V + \nabla V^T \right) \right)
-$$
+```
 
 Which we solve on the domain $\Omega = [-L, L]^2$, equipped with boundary conditions
 
-$$
+```math
 V_x(x=\pm L) = 0,  \quad
 V_y(y=\pm L) = 0
-$$
-$$
+```
+```math
 \left.\frac{\partial V_x}{\partial y} \right|_{y=\pm L}  = 0, \quad
 \left.\frac{\partial V_y}{\partial x} \right|_{x=\pm L} = 0
-$$ 
+```
 
 And augment the equation with derivatives in dual time $\theta$:
 
@@ -141,7 +141,9 @@ The matrix $A$ is symmetric only if boundary conditions are carefully handled. F
 
 In the form written above, $A$ appears to be negative definite, since the jacobian of $b - Av$ is s.p.d. To successfully apply the CG method, the whole equation has to be negated.
 
-In the following figure we show the result on the center values obtained from the miniapp setting. When using the vertex values, they look identical. For the relative residuals of the  velocity and pressure equations, the infinity norm is used. Convergence of the CG method is monitored via $\frac{||R||_\infty}{||\rho g||_\infty}$.
+In the following figure we show the result on the center values obtained from the miniapp setting. When using the vertex values, they look identical. For the relative residuals of the  velocity and pressure equations, the infinity norm is used. Convergence of the CG method is monitored via 
+$\frac{||R||}{||\rho g||}$
+.
 
 ![Result for the setting of the miniapp](figures/2_output_miniapp_10.png)
 
