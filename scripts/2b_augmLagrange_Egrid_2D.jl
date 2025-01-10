@@ -1,47 +1,9 @@
 using CairoMakie
 using ColorSchemes
-using LinearAlgebra
 using Enzyme
 
-function tplNorm(x::NamedTuple, p::Real=2)
-    return norm(norm.(values(x), p), p)   
-end
-
-
-function tplDot(x::NamedTuple, y::NamedTuple, a::NamedTuple)
-    s = 0.
-    for k = keys(x)
-        s += dot(x[k], a[k] .* y[k])
-    end
-    return s
-end
-
-
-function tplDot(x::NamedTuple, y::NamedTuple, a::Real=1.)
-    return sum(dot.(values(x), a .* values(y)))
-end
-
-
-function tplSet!(dest::NamedTuple, src::NamedTuple, a::NamedTuple)
-    for k = keys(dest)
-        copyto!(dest[k], a[k] .* src[k])
-    end
-    return nothing
-end
-
-
-function tplSet!(dest::NamedTuple, src::NamedTuple, a::Real=1.)
-    copyto!.(values(dest), a .* values(src))
-    return nothing
-end
-
-
-function tplScale!(x::NamedTuple, a::Real)
-    for k = keys(x)
-        x[k] .= a .* x[k]
-    end
-    return nothing
-end
+include("../src/cg_helpers.jl")
+include("../src/tuple_manip.jl")
 
 
 function compute_divV!(divV, V, dx, dy)
@@ -238,20 +200,6 @@ function update_D!(D, R, invM, β)
         end
     end
     return nothing
-end
-
-
-function compute_α(R, Q, P, P̄, P₀, V, V̄, D, ρg, η, μ, dx, dy, γ)
-    # compute Jacobian-vector product Jac(R) * D using Enzyme
-    # result is stored in Q
-    tplSet!(V̄, D) # need to copy D since autodiff may change it
-    autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Q),
-             Duplicated(P, P̄), Const(P₀), Duplicated(V, V̄),
-             Const(ρg), Const(η), Const(dx), Const(dy), Const(γ))
-    # compute α = dot(R, M*R) / dot(D, A*D)
-    # -> since R = rhs - A*V, ∂R/∂V * D = -A * D
-    #    therefore we use here the negative of the Jacobian-vector product
-    return  μ / tplDot(D, Q, -1.)
 end
 
 
