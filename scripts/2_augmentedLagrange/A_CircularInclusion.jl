@@ -113,60 +113,60 @@ function solve_inclusion(; n,
     # outer loop, Powell Hestenes
     it_out  = 1
     while it_out <= niter_out && (ω > ϵ_max)
-    verbose && @printf("Iteration %i\n", it_out)
-    P₀ .= P
+        verbose && @printf("Iteration %i\n", it_out)
+        P₀ .= P
 
-    # inner loop, Conjugate Gradient
+        # inner loop, Conjugate Gradient
 
-    # iteration zero
-    compute_R!(R, P, P₀, V, ρg, η, dx, dy, γ)
+        # iteration zero
+        compute_R!(R, P, P₀, V, ρg, η, dx, dy, γ)
 
-    tplSet!(D, R, invM)
-    μ = tplDot(R, D)
-    # δ = sqrt(μ) / δ_ref
-    δ = tplNorm(R, Inf) / δ_ref
-    # δ = tplNorm(D, Inf) / tplNorm(R, Inf)
-    push!(conv_in, δ)
-    # start iteration
-    it_in = 1
-    while it_in <= niter_in
-    α = compute_α(R, Q, P, P̄, P₀, V, V̄, D, ρg, η, μ, dx, dy, γ)
-    update_V!(V, D, α)
-    compute_R!(R, P, P₀, V, ρg, η, dx, dy, γ)
-    μ_new = tplDot(R, R, invM)
-    β = μ_new / μ
-    μ = μ_new
-    update_D!(D, R, invM, β)
+        tplSet!(D, R, invM)
+        μ = tplDot(R, D)
+        # δ = sqrt(μ) / δ_ref
+        δ = tplNorm(R, Inf) / δ_ref
+        # δ = tplNorm(D, Inf) / tplNorm(R, Inf)
+        push!(conv_in, δ)
+        # start iteration
+        it_in = 1
+        while it_in <= niter_in
+            α = compute_α(R, Q, P, P̄, P₀, V, V̄, D, ρg, η, μ, dx, dy, γ)
+            update_V!(V, D, α)
+            compute_R!(R, P, P₀, V, ρg, η, dx, dy, γ)
+            μ_new = tplDot(R, R, invM)
+            β = μ_new / μ
+            μ = μ_new
+            update_D!(D, R, invM, β)
 
-    # check convergence
-    # δ = α * tplNorm(D, Inf) / tplNorm(R, Inf)
-    # δ = sqrt(μ) / δ_ref
-    δ = tplNorm(R, Inf) / δ_ref
-    if δ < min(ϵ_in, max(ω, ϵ_max))
-    push!(conv_in, δ)
-    it_in += 1
-    break
-    end
-    if it_in % ncheck == 0
-    push!(conv_in, δ)
-    end
-    it_in += 1
-    end
-    it_in -= 1
-    push!(itercounts, it_in)
-    verbose && @printf("CG stopped after %inx iterations\n" , it_in / nx)
-    δ > min(ϵ_in, max(ω , ϵ_max)) && @printf("CG did not reach prescribed accuracy (%g > %g)\n", δ,  min(ϵ_in, max(ω , ϵ_max)))
+            # check convergence
+            # δ = α * tplNorm(D, Inf) / tplNorm(R, Inf)
+            # δ = sqrt(μ) / δ_ref
+            δ = tplNorm(R, Inf) / δ_ref
+            if δ < min(ϵ_in, max(ω, ϵ_max))
+                push!(conv_in, δ)
+                it_in += 1
+            break
+            end
+            if it_in % ncheck == 0
+                push!(conv_in, δ)
+            end
+            it_in += 1
+        end
+        it_in -= 1
+        push!(itercounts, it_in)
+        verbose && @printf("CG stopped after %inx iterations\n" , it_in / nx)
+        δ > min(ϵ_in, max(ω , ϵ_max)) && @printf("CG did not reach prescribed accuracy (%g > %g)\n", δ,  min(ϵ_in, max(ω , ϵ_max)))
 
-    # residual based termination
-    compute_divV!(divV, V, dx, dy)
-    ω = norm(divV, Inf) / ω_ref
+        # residual based termination
+        compute_divV!(divV, V, dx, dy)
+        ω = norm(divV, Inf) / ω_ref
 
-    # record residuals
-    push!(res_in, δ)
-    push!(res_out, ω)
+        # record residuals
+        push!(res_in, δ)
+        push!(res_out, ω)
 
-    verbose && @printf("ω = %g, δ = %g\n", ω, δ)
-    it_out += 1
+        verbose && @printf("ω = %g, δ = %g\n", ω, δ)
+        it_out += 1
     end
     it_out -= 1
     verbose && @printf("Finished after a total of %i outer and %inx CG iterations\n", it_out, sum(itercounts) / nx)
