@@ -41,10 +41,17 @@ function create_plot(etas, gammas, iters; nx=128)
     end
     Legend(fig[1,1][1,2], lin, "viscosity ratio", orientation=:vertical, framevisible=false, padding=(0, 0, 0, 0))
 
+    # find optimal gamma for each viscosity ratio
+    iters_replace_nan = copy(iters)
+    iters_replace_nan[isnan.(iters)] .= Inf
+    gamma_opts = [gammas[i] for (i, _) ∈ Tuple.(argmin(iters_replace_nan, dims=1)[1, :])]
+
     # heatmap of iterations
     htmp = Axis(fig[2,1][1,1], xlabel="gamma (log)", ylabel="viscosity ratio (log)")
     htmp_plot = heatmap!(htmp, log10.(gammas), log10.(etas), log10.(iters ./ nx), colormap=ColorSchemes.viridis)
     Colorbar(fig[2,1][1,2], htmp_plot, label="iterations / nx (log)")
+
+    scatterlines!(htmp, log10.(gamma_opts), log10.(etas), color=:black, marker=:cross, label="min iterations")
 
     return fig
 
