@@ -61,7 +61,7 @@ function compute_R!(R, P, η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
 
             dVxdy_dVydx = 0.5*((V.xv[i+1, j+1] - V.xv[i+1, j]) / dy + (V.yv[i+1, j+1] - V.yv[i, j+1]) / dx)
             
-            η.c[i, j] = 0.5 * B * (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2) ^ (0.5q - 1)
+            η.c[i, j] = 0.5 * B.c[i, j] * (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2) ^ (0.5q - 1)
 
 
         end
@@ -77,7 +77,7 @@ function compute_R!(R, P, η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
             dVxdy = 1 < j < ny+1 ? 0.5 * (V.xc[i, j] - V.xc[i, j-1]) / dy : 0.  # gradient of wall parallel velocity is zero
             dVydx = 1 < i < nx+1 ? 0.5 * (V.yc[i, j] - V.yc[i-1, j]) / dx : 0.  # gradient of wall parallel velocity is zero
 
-            η.v[i, j] = 0.5 * B * (0.5 * dVxdx^2 + 0.5 * dVydy^2 + (dVxdy + dVydx)^2 + 2 * ϵ̇_bg^2) ^ (0.5q - 1)
+            η.v[i, j] = 0.5 * B.v[i, j] * (0.5 * dVxdx^2 + 0.5 * dVydy^2 + (dVxdy + dVydx)^2 + 2 * ϵ̇_bg^2) ^ (0.5q - 1)
 
         end
     end
@@ -335,15 +335,14 @@ function initialise_invM(invM, η, dx, dy, γ)
 end
 
 
-function nonlinear_inclusion(;n=127,
-                        ρg_in=1.,
-                        niter=10000,
-                        γ_factor=1.,
+function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
                         ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, verbose=false)
-    L_ref = 10. # reference length 
+    L_ref =  1. # reference length 
+    ρg_avg = 1. # average density
 
-    # parameters  for n == 3, A = (24 * 1e-25) in Glen's law, see Cuffrey and Paterson (2006), table 3.3
-    B = (24 * 1e-25) ^ (-1/3)
+    # physical parameters would be: n == 3, A = (24 * 1e-25) in Glen's law, see Cuffrey and Paterson (2006), table 3.3
+    # and q = 1. + 1/n, η_avg = (24 * 1e-25) ^ (-1/n), see Schoof (2006)
+    η_avg = 1. 
     q = 1. + 1/3  
 
     Lx = Ly = L_ref
@@ -357,9 +356,21 @@ function nonlinear_inclusion(;n=127,
     xv = LinRange(-0.5Lx, 0.5Lx, nx+1)
     yv = LinRange(-0.5Ly, 0.5Ly, ny+1)
 
+    A_in  = π * R_in^2
+    A_tot = Lx * Ly
+    η_out = η_avg * A_tot / (A_tot + (η_ratio - 1)*A_in)
+    η_in  = η_out * η_ratio
+    # body force
+    Δρg   = ρg_avg * A_tot / A_in
+
+
     # field initialisation
-    ρg   = (c=[x^2 + y^2 < R_in^2 ? ρg_in : 0. for x=xc, y=yc],
-            v=[x^2 + y^2 < R_in^2 ? ρg_in : 0. for x=xv, y=yv])
+    ρg   = (c=[x^2 + y^2 < R_in^2 ? Δρg : 0. for x=xc, y=yc],
+            v=[x^2 + y^2 < R_in^2 ? Δρg : 0. for x=xv, y=yv])
+
+    B    = (c=[x^2 + y^2 < R_in^2 ? η_in : η_out for x=xc, y=yc],
+            v=[x^2 + y^2 < R_in^2 ? η_in : η_out for x=xv, y=yv])
+
     P    = (c=zeros(nx, ny), v=zeros(nx+1, ny+1))
     P₀   = deepcopy(P)  # old pressure
     P̄    = deepcopy(P)  # memory needed for auto-differentiation
@@ -377,18 +388,20 @@ function nonlinear_inclusion(;n=127,
     
     
     # Coefficient of augmented Lagrangian
-    γ = γ_factor
+    γ = γ_factor * tplNorm(B, Inf)
 
     # residual norms for monitoring convergence
     r_P  = Inf
     r_V  = Inf
     δ    = Inf
+    ω    = Inf
 
     δ_ref = tplNorm(ρg, Inf)
+    ω_ref = ρg_avg * Lx / η_avg
 
     # Powell Hestenes
     it = 0
-    while it <= niter && r_P > ϵ_ph
+    while it < niter && r_P > ϵ_ph
         verbose && println("Iteration ", it_P)
         tplSet!(P₀, P)
 
@@ -450,16 +463,16 @@ function nonlinear_inclusion(;n=127,
             V.yv .+= dV.yv
 
 
-            r_V = tplNorm(R, Inf) # / δ_ref # is this scaling correct ?
+            r_V = tplNorm(R, Inf) / δ_ref # is this scaling correct ?
             println("Newton residual = ", r_V, "; total iteration count: ", it)
         end    
         compute_divV!(divV, V, dx, dy)
-        r_P = tplNorm(divV, Inf) # / ρg_in / L_ref # missing factor to replace viscosity of linear case
+        r_P = tplNorm(divV, Inf) / ω_ref # / ρg_in / L_ref # missing factor to replace viscosity of linear case
     end
 
     return it, P, V
 end
 
 
-outfields = nonlinear_inclusion(n=64, niter=1000, ϵ_ph=1e-3);
+outfields = nonlinear_inclusion(n=64, niter=10000, ϵ_ph=0.1);
 
