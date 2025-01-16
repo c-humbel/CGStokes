@@ -17,7 +17,7 @@ function compute_α(R, Q, P, P̄, P₀, V, V̄, D, ρg, η, μ, dx, dy, γ)
 end
 
 
-function compute_divV!(divV, V, dx, dy)
+@inbounds function compute_divV!(divV, V, dx, dy)
     nx, ny = size(divV.c)
     for j = 1:ny
         for i = 1:nx
@@ -39,7 +39,7 @@ function compute_divV!(divV, V, dx, dy)
 end
 
 
-function compute_R!(R, P, P₀, V, ρg, η, dx, dy, γ)
+@inbounds function compute_R!(R, P, P₀, V, ρg, η, dx, dy, γ)
     nx, ny = size(P.c)
 
     ### Dirichlet boundary conditions
@@ -186,7 +186,7 @@ function compute_R!(R, P, P₀, V, ρg, η, dx, dy, γ)
 end
 
 
-function update_D!(D, R, invM, β)
+@inbounds function update_D!(D, R, invM, β)
     for j = 1:size(D.xc, 2)
         for i = 2:size(D.xc, 1)-1
             D.xc[i, j] = invM.xc[i, j] * R.xc[i, j] + β * D.xc[i, j]
@@ -214,7 +214,7 @@ function update_D!(D, R, invM, β)
 end
 
 
-function update_V!(V, D, α)
+@inbounds function update_V!(V, D, α)
     for j = 1:size(V.xc, 2)
         for i = 2:size(V.xc, 1)-1
             V.xc[i, j] += α * D.xc[i, j]
@@ -241,7 +241,7 @@ function update_V!(V, D, α)
 end
 
 
-function initialise_invM(invM, η, dx, dy, γ)
+@inbounds function initialise_invM(invM, η, dx, dy, γ)
     nx, ny = size(η.c)
 
     ## inner points
