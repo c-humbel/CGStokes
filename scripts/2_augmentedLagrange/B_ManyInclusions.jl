@@ -52,7 +52,12 @@ function initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xs, ys, Lx, Ly; s
 
     # generate relative viscosity for inclusions
     η_ratios = fill(η_ratio, ninc)
-    η_ratios[2:end] .-= rand(rng, ninc-1) .* (η_ratio / 2)
+    offsets = rand(rng, ninc-1) .* (η_ratio / 2)
+    if η_ratio > 1
+        η_ratios[2:end] .-= offsets
+    elseif η_ratio < 1
+        η_ratios[2:end] .+= offsets
+    end
     shuffle!(rng, η_ratios)
 
     # area of inclusions
@@ -198,7 +203,7 @@ function solve_many_inclusions(; n, ninc,
 end
 
 function test_gamma_factor(outfile="data_gamma_n128_inc8.csv"; eta_range=-4:6, gamma_range=LinRange(-2, 1, 10), niter=5e5)
-    write(outfile, "eta_ratio, gamma_factor, iterations")
+    write(outfile, "eta_ratio, gamma_factor, iterations\n")
 
     for η_exp = eta_range
         η_ratio = 10.0^η_exp

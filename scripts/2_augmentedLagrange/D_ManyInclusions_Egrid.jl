@@ -52,7 +52,12 @@ function initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, L
 
     # generate relative viscosity for inclusions
     η_ratios = fill(η_ratio, ninc)
-    η_ratios[2:end] .-= rand(rng, ninc-1) .* (η_ratio / 2)
+    offsets = rand(rng, ninc-1) .* (η_ratio / 2)
+    if η_ratio > 1
+        η_ratios[2:end] .-= offsets
+    elseif η_ratio < 1
+        η_ratios[2:end] .+= offsets
+    end
     shuffle!(rng, η_ratios)
 
     # area of inclusions
@@ -99,17 +104,24 @@ function initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, L
     return nothing
 end
 
-function solve_many_inclusions(;n=127, ninc=8,
-                                η_ratio=0.1,
-                                niter_in=100, niter_out=100, ncheck=10,
-                                γ_factor=1.,
-                                ϵ_cg=1e-3, ϵ_ph=1e-6, seed=1234, verbose=false)
+
+function plot_η(η, xs, ys)
+    fig = Figure(size=(400, 300))
+    ax = Axis(fig[1, 1], aspect=1, xlabel="x", ylabel="y")
+    htmp = heatmap!(ax, xs, ys, η, colormap=:viridis)
+    Colorbar(fig[1, 2], htmp)
+    fig
+end
+
+
+function solve_many_inclusions(;n=127, ninc=8, η_ratio=0.1, γ_factor=1.,
+                                max_iter=1e4, ϵ_cg=1e-3, ϵ_ph=1e-6,
+                                seed=1234, verbose=false)
     η_avg  = 1. # -> Pa s
     ρg_avg = 1. # -> Pa / m
     Lx     = 1. # -> m
 
     Ly     = Lx
-    R_in   = 0.1 * Lx
     nx, ny = n, n
     dx, dy = Lx / nx, Ly / ny
 
@@ -117,14 +129,6 @@ function solve_many_inclusions(;n=127, ninc=8,
     yc = LinRange(-0.5Ly + 0.5dy, 0.5Ly - 0.5dy, ny)
     xv = LinRange(-0.5Lx, 0.5Lx, nx+1)
     yv = LinRange(-0.5Ly, 0.5Ly, ny+1)
-
-    # compute viscosities
-    A_in  = π * R_in^2
-    A_tot = Lx * Ly
-    η_out = η_avg * A_tot / (A_tot + (η_ratio - 1)*A_in)
-    η_in  = η_out * η_ratio
-    # body force
-    Δρg   = ρg_avg * A_tot / A_in
     
     # field initialisation
     η    = (c=zeros(nx, ny), v=zeros(nx+1, ny+1)) 
@@ -152,7 +156,6 @@ function solve_many_inclusions(;n=127, ninc=8,
     # visualisation
     res_out    = []
     res_in     = []
-    res_cg     = []
     itercounts = []
 
     # residual norms for monitoring convergence
@@ -164,9 +167,8 @@ function solve_many_inclusions(;n=127, ninc=8,
 
 
     # outer loop, Powell Hestenes
-    it_out  = 1
-    while it_out <= niter_out && (ω > ϵ_ph || δ > ϵ_ph)
-        verbose && println("Iteration ", it_out)
+    it = 0
+    while it < max_iter && (ω > ϵ_ph || δ > ϵ_ph)
         tplSet!(P₀, P)
 
         # inner loop, Conjugate Gradient
@@ -177,8 +179,7 @@ function solve_many_inclusions(;n=127, ninc=8,
         tplSet!(D, R, invM)
         μ = tplDot(R, D)
         # start iteration
-        it_in = 0
-        while it_in < niter_in
+        while it < max_iter && (δ > min(ϵ_cg, max(ω, ϵ_ph)))
             α = compute_α(R, Q, P, P̄, P₀, V, V̄, D, ρg, η, μ, dx, dy, γ)
             update_V!(V, D, α)
             compute_R!(R, P, P₀, V, ρg, η, dx, dy, γ)
@@ -186,50 +187,51 @@ function solve_many_inclusions(;n=127, ninc=8,
             β = μ_new / μ
             μ = μ_new
             update_D!(D, R, invM, β)
-
-            it_in += 1
-
-            # check convergence
             δ = tplNorm(R, Inf) / δ_ref
-            if δ < min(ϵ_cg,  max(ω, ϵ_ph))
-                push!(res_cg, δ)
-                break
-            end
-            if it_in % ncheck == 0
-                push!(res_cg, δ)
-            end
+
+            it += 1
         end
-        push!(itercounts, it_in)
 
-        verbose && @printf("CG stopped after %inx iterations\n" , it_in / nx)
-        δ > min(ϵ_cg, max(ω , ϵ_ph)) && @printf("CG did not reach prescribed accuracy (%g > %g)\n", δ,  min(ϵ_cg, max(ω , ϵ_ph)))
+        verbose && @printf("CG stopped after %inx iterations:\t" , isempty(itercounts) ? it / nx : (it - itercounts[end]) / nx)
 
-        push!(res_in, δ)
+        push!(itercounts, it)
 
         compute_divV!(divV, V, dx, dy)
         ω = tplNorm(divV, Inf) / ω_ref
         push!(res_out, ω)
+        push!(res_in, δ)
 
-        verbose && println("v-residual = ", δ)
-        verbose && println("p-residual = ", ω)
+        verbose && @printf("v-residual = %g\tp-residual = %g\n", ω, δ)
 
-        it_out += 1
     end
-    it_out -= 1
-    verbose && @printf("Finished after a total of %i outer and %inx CG iterations\n", it_out, sum(itercounts) / nx)
-    ω > ϵ_ph && @printf("Iteration did not reach required accuracy (%g > %g)\n", ω,  ϵ_ph)
+    if verbose
+        @printf("Finished after a total of %i outer and %inx CG iterations\n", length(itercounts), it / nx)
+        (ω > ϵ_ph || δ > ϵ_ph) && @printf("Iteration did not reach required accuracy (%g or %g > %g)\n", ω,  δ, ϵ_ph)
+    end
 
-    return P, V, R, res_out, res_in, res_cg, itercounts, (xc, yc), (xv, yv)
+    return P, V, R, η, res_out, res_in, itercounts, (xc, yc), (xv, yv)
 end
 
 
-n = 128
-η_ratio = 1e6
-γ_factor = .02
-niter_in = 10n*n
-niter_out = 500
-ncheck = n
+function test_gamma_factor(eta_range=-4:6, gamma_range=LinRange(-2, 1, 10), max_iter=5e5; verbose=false)
+    outfile="data_Egrid_gamma_n128_inc8.csv"
 
-outfields = solve_many_inclusions(n=n, ninc=8, η_ratio=η_ratio, niter_in=niter_in, niter_out=niter_out, ncheck=ncheck, ϵ_cg=0.01, verbose=true, seed=2025)
+    write(outfile, "eta_ratio,eta_max,eta_min,gamma_factor,gamma,iterations\n")
 
-create_output_plot(outfields...; ncheck=ncheck, η_ratio=η_ratio, gamma=γ_factor, savefig=true)
+    for η_exp = eta_range
+        η_ratio = 10.0^η_exp
+        for γ_exp = gamma_range
+            γ_factor = round(10.0^γ_exp, sigdigits=1)
+            @printf("start with η_ratio %g, γ_factor %g ...%s", η_ratio, γ_factor, verbose ? "\n" : " ")
+            results = solve_many_inclusions(n=128, ninc=8, η_ratio=η_ratio, max_iter=max_iter, γ_factor=γ_factor,
+                                            ϵ_cg=0.1, ϵ_ph=1e-5, verbose=verbose)
+            @printf("done\n\n")
+            it      = results[7][end]
+            max_eta = tplNorm(results[4], Inf)
+            min_eta = tplNorm(results[4], -Inf)
+            open(outfile, "a") do io
+                @printf(io, "%g,%g,%g,%g,%g,%d\n", η_ratio, max_eta, min_eta, γ_factor, γ_factor * max_eta, it)
+            end
+        end
+    end
+end
