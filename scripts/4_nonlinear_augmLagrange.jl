@@ -336,7 +336,7 @@ end
 
 
 function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
-                        ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, verbose=false)
+                            ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, verbose=false)
     L_ref =  1. # reference length 
     ρg_avg = 1. # average density
 
@@ -391,24 +391,40 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
     γ = γ_factor * tplNorm(B, Inf)
 
     # residual norms for monitoring convergence
-    r_P  = Inf
-    r_V  = Inf
-    δ    = Inf
-    ω    = Inf
+    δ = Inf # CG
+    χ = Inf # Newton
+    ω = Inf # Pressure
 
-    δ_ref = tplNorm(ρg, Inf)
+    δ_ref = tplNorm(ρg, Inf) # is this correct ?
     ω_ref = ρg_avg * Lx / η_avg
+
+    # visualisation
+    fig = Figure(size=(600,400))
+    axs = (Eta=Axis(fig[1,1][1,1], aspect=1), P=Axis(fig[1,2][1,1], aspect=1),
+           Vx=Axis(fig[2,1][1,1], aspect=1), Vy=Axis(fig[2,2][1,1], aspect=1))
+    plt = (Eta=heatmap!(axs.Eta, η.c, colormap=ColorSchemes.viridis),
+           P=heatmap!(axs.P, P.c, colormap=ColorSchemes.viridis),
+           Vx=heatmap!(axs.Vx, V.xc, colormap=ColorSchemes.viridis),
+           Vy=heatmap!(axs.Vy, V.yc, colormap=ColorSchemes.viridis))
+    cbar= (Eta=Colorbar(fig[1, 1][1, 2], plt.Eta),
+           P=Colorbar(fig[1, 2][1, 2], plt.P),
+           Vx=Colorbar(fig[2, 1][1, 2], plt.Vx),
+           Vy=Colorbar(fig[2, 2][1, 2], plt.Vy))
+
+    display(fig)
 
     # Powell Hestenes
     it = 0
-    while it < niter && r_P > ϵ_ph
+    while it < niter && ω > ϵ_ph
         verbose && println("Iteration ", it_P)
         tplSet!(P₀, P)
 
-        # Newton iteration
-        while it < niter && r_V > ϵ_newton
-            compute_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
+        compute_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
 
+        χ = tplNorm(R, Inf) / δ_ref
+
+        # Newton iteration
+        while it < niter && χ > ϵ_newton
             # initialise preconditioner
             initialise_invM(invM, η, dx, dy, γ)
 
@@ -418,13 +434,12 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
             autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Q),
                      Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
                      Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(dx), Const(dy), Const(γ))
-            K.xc .= R.xc .- Q.xc
-            K.yc .= R.yc .- Q.yc
-            K.xv .= R.xv .- Q.xv
-            K.yv .= R.yv .- Q.yv
+            tplSet!(K, R)
+            tplAdd!(K, Q)
 
             tplSet!(D, K, invM)
             μ = tplDot(K, D)
+            δ = tplNorm(K, Inf) / δ_ref
             # start iteration
             while it <= niter && δ > ϵ_cg
                 # compute α
@@ -442,10 +457,8 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
                 autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Q),
                          Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
                          Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(dx), Const(dy), Const(γ))
-                K.xc .= R.xc .- Q.xc
-                K.yc .= R.yc .- Q.yc
-                K.xv .= R.xv .- Q.xv
-                K.yv .= R.yv .- Q.yv
+                tplSet!(K, R)
+                tplAdd!(K, Q)
 
 
                 μ_new = tplDot(K, K, invM)
@@ -454,25 +467,38 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
                 update_D!(D, K, invM, β)
 
                 # compute residual norm
-                δ = tplNorm(K, Inf) / δ_ref
+                δ = tplNorm(K, Inf) / δ_ref # correct scaling?
                 it += 1
+
+                if it % 10 == 0 println("CG residual = ", δ) end
             end
-            V.xc .+= dV.xc
-            V.yc .+= dV.yc
-            V.xv .+= dV.xv
-            V.yv .+= dV.yv
+            tplAdd!(V, dV)
+
+            # update plot
+            plt.Eta[3][] .= log10.(η.c)
+            plt.P[3][]   .= P.c
+            plt.Vx[3][]  .= V.xc
+            plt.Vy[3][]  .= V.yc
+            plt.Eta.colorrange[]= (min(-1,log10(minimum(η.c))), max(1,log10(maximum(η.c))))
+            plt.P.colorrange[]  = (min(-1e-10,minimum(P.c)), max(1e-10, maximum(P.c)))
+            plt.Vx.colorrange[] = (min(-1e-10,minimum(V.xc)), max(1e-10,maximum(V.xc)))
+            plt.Vy.colorrange[] = (min(-1e-10,minimum(V.yc)), max(1e-10,maximum(V.yc)))
 
 
-            r_V = tplNorm(R, Inf) / δ_ref # is this scaling correct ?
-            println("Newton residual = ", r_V, "; total iteration count: ", it)
+            display(fig)
+
+            compute_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
+            χ = tplNorm(R, Inf) / δ_ref # correct scaling?
+            println("Newton residual = ", χ, "; total iteration count: ", it)
         end    
         compute_divV!(divV, V, dx, dy)
-        r_P = tplNorm(divV, Inf) / ω_ref # / ρg_in / L_ref # missing factor to replace viscosity of linear case
+        ω = tplNorm(divV, Inf) / ω_ref # correct scaling?
+        println("Pressure residual = ", ω, ", Newton residual = ", χ, ", CG residual = ", δ)
     end
 
-    return it, P, V
+    return it, P, V, R, η
 end
 
 
-outfields = nonlinear_inclusion(n=64, niter=10000, ϵ_ph=0.1);
+outfields = nonlinear_inclusion(n=64, niter=5000, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=0.5);
 
