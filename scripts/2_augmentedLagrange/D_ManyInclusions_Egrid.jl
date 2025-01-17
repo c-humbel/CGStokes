@@ -175,11 +175,11 @@ function solve_many_inclusions(;n=127, ninc=8, η_ratio=0.1, γ_factor=1.,
 
         # iteration zero
         compute_R!(R, P, P₀, V, ρg, η, dx, dy, γ)
-
         tplSet!(D, R, invM)
         μ = tplDot(R, D)
+        δ = tplNorm(R, Inf) / δ_ref
         # start iteration
-        while it < max_iter && (δ > min(ϵ_cg, max(ω, ϵ_ph)))
+        while it < max_iter && δ > min(ϵ_cg, max(ω, ϵ_ph))
             α = compute_α(R, Q, P, P̄, P₀, V, V̄, D, ρg, η, μ, dx, dy, γ)
             update_V!(V, D, α)
             compute_R!(R, P, P₀, V, ρg, η, dx, dy, γ)
@@ -192,7 +192,7 @@ function solve_many_inclusions(;n=127, ninc=8, η_ratio=0.1, γ_factor=1.,
             it += 1
         end
 
-        verbose && @printf("CG stopped after %inx iterations:\t" , isempty(itercounts) ? it / nx : (it - itercounts[end]) / nx)
+        verbose && @printf("CG stopped after %6.0g iterations: " , isempty(itercounts) ? it : (it - itercounts[end]))
 
         push!(itercounts, it)
 
@@ -201,7 +201,9 @@ function solve_many_inclusions(;n=127, ninc=8, η_ratio=0.1, γ_factor=1.,
         push!(res_out, ω)
         push!(res_in, δ)
 
-        verbose && @printf("v-residual = %g\tp-residual = %g\n", ω, δ)
+        verbose && @printf("v-residual = %12g, p-residual = %12g\n", δ, ω)
+
+        if length(itercounts) >= max_iter break end
 
     end
     if verbose
