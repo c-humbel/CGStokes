@@ -8,7 +8,9 @@ end
 function tplDot(x::NamedTuple, y::NamedTuple, a::NamedTuple)
     s = 0.
     for k = keys(x)
-        s += dot(x[k], a[k] .* y[k])
+        for I = eachindex(x[k])
+            s += (x[k][I] * a[k][I] * y[k][I])
+        end
     end
     return s
 end
