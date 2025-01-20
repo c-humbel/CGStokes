@@ -203,7 +203,7 @@ function solve_many_inclusions(;n=127, ninc=8, η_ratio=0.1, γ_factor=1.,
 
         verbose && @printf("v-residual = %12g, p-residual = %12g\n", δ, ω)
 
-        if length(itercounts) >= max_iter break end
+        if length(itercounts) >= max_iter it = max_iter end
 
     end
     if verbose
