@@ -1,9 +1,108 @@
 using CairoMakie
 using ColorSchemes
 using Enzyme
+using Random
 
 include("../src/tuple_manip.jl")
 
+# copied from 2_augmentedLagrange/D_ManyInclusions_Egrid.jl
+function generate_inclusions(ninc, xs, ys, rng)
+    dx = xs[2] - xs[1]
+    dy = ys[2] - ys[1]
+    nx = length(xs)
+    ny = length(ys)
+    Lx = nx * dx
+    Ly = ny * dy
+
+    r_min = 2   * max(dx, dy)
+    r_max = 0.1 * min(Lx, Ly)
+
+    # generate random radii
+    rs = r_min .+ (r_max - r_min) .* rand(rng, ninc)
+
+    # generate random positions for non-overlapping circles
+    xcs = zeros(ninc)
+    ycs = zeros(ninc)
+    i = 1
+    while i <= ninc
+        # generate guess
+        xcs[i] = rand(rng, xs[end÷5:4end÷5])
+        ycs[i] = rand(rng, ys[end÷5:4end÷5])
+        # check that cicles are not overlapping with existing ones
+        j = 1
+        while j < i
+            if (xcs[i] - xcs[j])^2 + (ycs[i] - ycs[j])^2 < (rs[i] + rs[j] + 2r_min)^2
+                break
+            end
+            j += 1
+        end     
+        if j == i
+            i += 1
+        end 
+    end
+    return zip(xcs, ycs), rs
+end
+
+# copied from 2_augmentedLagrange/D_ManyInclusions_Egrid.jl
+function initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly; seed=1234, ninc=5)
+    rng = MersenneTwister(seed)
+
+    # generate radius and location inclusions
+    centers, radii = generate_inclusions(ninc, xc, yc, rng)
+
+    # generate relative viscosity for inclusions
+    η_ratios = fill(η_ratio, ninc)
+    offsets = rand(rng, ninc-1) .* (η_ratio / 2)
+    if η_ratio > 1
+        η_ratios[2:end] .-= offsets
+    elseif η_ratio < 1
+        η_ratios[2:end] .+= offsets
+    end
+    shuffle!(rng, η_ratios)
+
+    # area of inclusions
+    As = [π*r^2 for r in radii]
+    A_inc = sum(As)
+    A_tot = Lx * Ly
+
+    # matrix viscosity
+    η_mat = η_avg * A_tot / (sum(As .* η_ratios) + A_tot - A_inc)
+
+    # body force
+    Δρg   = ρg_avg * A_tot / A_inc
+
+    # set viscosity and body force values
+    η.c  .= η_mat
+    η.v  .= η_mat
+    ρg.c .= 0.
+    ρg.v .= 0.
+    for j = eachindex(yc)
+        for i = eachindex(xc)
+            for ((x, y), r, η_rel) ∈ zip(centers, radii, η_ratios)
+                if (xc[i] - x)^2 + (yc[j] - y)^2 <= r^2
+                    η.c[i, j]  = η_rel * η_mat
+                    ρg.c[i, j] = Δρg
+                    break
+                end
+            end
+        end
+    end
+
+    for j = eachindex(yv)
+        for i = eachindex(xv)
+            for ((x, y), r, η_rel) ∈ zip(centers, radii, η_ratios)
+                if (xv[i] - x)^2 + (yv[j] - y)^2 <= r^2
+                    η.v[i, j]  = η_rel * η_mat
+                    ρg.v[i, j] = Δρg
+                    break
+                end
+            end
+        end
+    end
+
+
+    return nothing
+end
 
 function compute_divV!(divV, V, dx, dy)
     nx, ny = size(divV.c)
@@ -335,18 +434,15 @@ function initialise_invM(invM, η, dx, dy, γ)
 end
 
 
-function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
+function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_factor=1.,
                             ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, verbose=false)
     L_ref =  1. # reference length 
     ρg_avg = 1. # average density
 
-    # physical parameters would be: n == 3, A = (24 * 1e-25) in Glen's law, see Cuffrey and Paterson (2006), table 3.3
-    # and q = 1. + 1/n, η_avg = (24 * 1e-25) ^ (-1/n), see Schoof (2006)
-    η_avg = 1. 
-    q = 1. + 1/3  
+    B_avg = 1. 
+    q = 1. + 1/3
 
     Lx = Ly = L_ref
-    R_in  = 0.1 * L_ref
     nx = ny = n
     ϵ̇_bg = eps()
 
@@ -356,20 +452,9 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
     xv = LinRange(-0.5Lx, 0.5Lx, nx+1)
     yv = LinRange(-0.5Ly, 0.5Ly, ny+1)
 
-    A_in  = π * R_in^2
-    A_tot = Lx * Ly
-    η_out = η_avg * A_tot / (A_tot + (η_ratio - 1)*A_in)
-    η_in  = η_out * η_ratio
-    # body force
-    Δρg   = ρg_avg * A_tot / A_in
-
-
     # field initialisation
-    ρg   = (c=[x^2 + y^2 < R_in^2 ? Δρg : 0. for x=xc, y=yc],
-            v=[x^2 + y^2 < R_in^2 ? Δρg : 0. for x=xv, y=yv])
-
-    B    = (c=[x^2 + y^2 < R_in^2 ? η_in : η_out for x=xc, y=yc],
-            v=[x^2 + y^2 < R_in^2 ? η_in : η_out for x=xv, y=yv])
+    ρg   = (c=zeros(nx, ny), v=zeros(nx+1, ny+1))
+    B    = (c=zeros(nx, ny), v=zeros(nx+1, ny+1))
 
     P    = (c=zeros(nx, ny), v=zeros(nx+1, ny+1))
     P₀   = deepcopy(P)  # old pressure
@@ -386,9 +471,13 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
     Q    = deepcopy(V)  # Jacobian of compute_R wrt. V, multiplied by some vector (used for autodiff)
     invM = deepcopy(V)  # preconditioner, cells correspoinding to Dirichlet BC are zero
     
-    
+    initialise_η_ρ!(B, ρg, B_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly, ninc=ninc)
+
     # Coefficient of augmented Lagrangian
     γ = γ_factor * tplNorm(B, Inf)
+
+    # damping parameter for newton iteration
+    λ = 1.
 
     # residual norms for monitoring convergence
     δ = Inf # CG
@@ -396,12 +485,12 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
     ω = Inf # Pressure
 
     δ_ref = tplNorm(ρg, Inf) # is this correct ?
-    ω_ref = ρg_avg * Lx / η_avg
+    ω_ref = ρg_avg * Lx / B_avg
 
     # visualisation
-    fig = Figure(size=(600,400))
-    axs = (Eta=Axis(fig[1,1][1,1], aspect=1), P=Axis(fig[1,2][1,1], aspect=1),
-           Vx=Axis(fig[2,1][1,1], aspect=1), Vy=Axis(fig[2,2][1,1], aspect=1))
+    fig = Figure(size=(800,600))
+    axs = (Eta=Axis(fig[1,1][1,1], aspect=1, title="viscosity (log)"), P=Axis(fig[1,2][1,1], aspect=1, title="pressure"),
+           Vx=Axis(fig[2,1][1,1], aspect=1, title="horizontal velocity"), Vy=Axis(fig[2,2][1,1], aspect=1, title="vertical velocity"))
     plt = (Eta=heatmap!(axs.Eta, η.c, colormap=ColorSchemes.viridis),
            P=heatmap!(axs.P, P.c, colormap=ColorSchemes.viridis),
            Vx=heatmap!(axs.Vx, V.xc, colormap=ColorSchemes.viridis),
@@ -419,7 +508,7 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
         verbose && println("Iteration ", it_P)
         tplSet!(P₀, P)
 
-        compute_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
+        compute_R!(R, P, η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
 
         χ = tplNorm(R, Inf) / δ_ref
 
@@ -448,7 +537,7 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
                      Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
                      Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(dx), Const(dy), Const(γ))
 
-                α = μ / tplDot(D, Q, -1.)
+                α = - μ / tplDot(D, Q)
 
                 update_V!(dV, D, α)
 
@@ -469,10 +558,25 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
                 # compute residual norm
                 δ = tplNorm(K, Inf) / δ_ref # correct scaling?
                 it += 1
-
-                if it % 10 == 0 println("CG residual = ", δ) end
             end
-            tplAdd!(V, dV)
+            # damped to newton iteration
+            tplSet!(V̄, V)
+            # tplScale!(dV, λ)
+            tplAdd!(V̄, dV)
+            compute_R!(R, P,  η, P₀, V̄, ρg, B, q, ϵ̇_bg, dx, dy, γ)
+            χ_new = tplNorm(R, Inf) / δ_ref
+            λ = 1.
+            while χ_new >= χ
+                tplSet!(V̄, V)
+                tplScale!(dV, inv(MathConstants.golden))
+                tplAdd!(V̄, dV)
+                compute_R!(R, P, η, P₀, V̄, ρg, B, q, ϵ̇_bg, dx, dy, γ)
+                λ /= MathConstants.golden
+                χ_new = tplNorm(R, Inf) / δ_ref
+            end
+            tplSet!(V, V̄)
+            # λ *= MathConstants.golden
+            χ = χ_new
 
             # update plot
             plt.Eta[3][] .= log10.(η.c)
@@ -484,12 +588,9 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
             plt.Vx.colorrange[] = (min(-1e-10,minimum(V.xc)), max(1e-10,maximum(V.xc)))
             plt.Vy.colorrange[] = (min(-1e-10,minimum(V.yc)), max(1e-10,maximum(V.yc)))
 
-
             display(fig)
-
-            compute_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
-            χ = tplNorm(R, Inf) / δ_ref # correct scaling?
-            println("Newton residual = ", χ, "; total iteration count: ", it)
+            
+            println("Newton residual = ", χ, "; λ =", λ, "; total iteration count: ", it)
         end    
         compute_divV!(divV, V, dx, dy)
         ω = tplNorm(divV, Inf) / ω_ref # correct scaling?
@@ -500,5 +601,6 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
 end
 
 
-outfields = nonlinear_inclusion(n=64, niter=5000, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=0.5);
+n = 64
+outfields = nonlinear_inclusion(n=n, ninc=4, η_ratio=10.,γ_factor=100., niter=500*n, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4);
 
