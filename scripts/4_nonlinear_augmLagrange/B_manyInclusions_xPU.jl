@@ -384,9 +384,7 @@ end
 end
 
 
-function initialise_invM(invM, η, iΔx, iΔy, γ)
-    nx, ny = size(η.c)
-
+@kernel inbounds=true function initialise_invM(invM, η, iΔx, iΔy, γ)
     ## inner points
     # x direction, cell centers
     if 1 < i < size(invM.xc, 1) && 1 < j < size(invM.xc, 2)
@@ -414,12 +412,10 @@ function initialise_invM(invM, η, iΔx, iΔy, γ)
 
     # y direction, vertices
     if 1 < i < size(invM.yv, 1) && 1 < j < size(invM.yv, 2)
-        for i=2:nx
-            mij = ( 2iΔy^2 * (η.v[i  , j-1] + η.v[i, j  ])
-                   + iΔx^2 * (η.c[i-1, j-1] + η.c[i, j-1])
-                   + 2γ *iΔy^2)
-            invM.yv[i, j] = inv(mij)
-        end
+        mij = ( 2iΔy^2 * (η.v[i  , j-1] + η.v[i, j  ])
+                + iΔx^2 * (η.c[i-1, j-1] + η.c[i, j-1])
+                + 2γ *iΔy^2)
+        invM.yv[i, j] = inv(mij)
     end
 
     ## Neumann boundary points
@@ -431,7 +427,7 @@ function initialise_invM(invM, η, iΔx, iΔy, γ)
                                + 2γ * iΔx^2)
         elseif j == size(invM.xc, 2)
             invM.xc[i, j] = inv(2iΔx^2 * (η.c[i-1, j] + η.c[i, j])
-                               + iΔy^2 * η.v[i, j-1]
+                               + iΔy^2 * (η.v[i  , j])
                                + 2γ * iΔx^2)
         end
     end
@@ -439,12 +435,12 @@ function initialise_invM(invM, η, iΔx, iΔy, γ)
     if 1 < j < size(invM.yc, 2)
         if i == 1
             invM.yc[i, j] = inv(2iΔy^2 * (η.c[i, j-1] + η.c[i, j])
-                                + iΔx^2 * (η.v[i+1, j])
-                                + 2γ * iΔy^2)
+                               + iΔx^2 * (η.v[i+1, j])
+                               + 2γ * iΔy^2)
         end
         if i == size(invM.yc, 1)
             invM.yc[i, j] = inv(2iΔy^2 * (η.c[i, j-1] + η.c[i, j])
-                               + iΔx^2 * (η.v[i-1, j])
+                               + iΔx^2 * (η.v[i, j  ])
                                + 2γ * iΔy^2)
         end
     end
@@ -452,7 +448,7 @@ function initialise_invM(invM, η, iΔx, iΔy, γ)
     if 1 < i < size(invM.xv, 1)
         if j == 1
             invM.xv[i, j] = inv(2iΔx^2 * (η.v[i-1, j] + η.v[i, j])
-                               + iΔy^2 * (η.c[i-1, j+1])
+                               + iΔy^2 * (η.c[i-1, j])
                                + 2γ * iΔx^2)
         end
         if j == size(invM.xv, 2)
@@ -465,11 +461,11 @@ function initialise_invM(invM, η, iΔx, iΔy, γ)
     if 1 < j < size(invM.yv, 2)
         if i == 1
             invM.yv[i, j] = inv(2iΔy^2 * (η.v[i, j-1] + η.v[i, j])
-                               + iΔx^2 * (η.c[i+1, j-1])
+                               + iΔx^2 * (η.c[i, j-1])
                                + 2γ * iΔy^2)
         end
         if i == size(invM.yv, 1)
-            invM.yv[i, j] = inv(2iΔy^2 * (η.v[i, j-1] + η.v[i, j])
+            invM.yv[i, j] = inv(2iΔy^2 * (η.v[i  , j-1] + η.v[i, j])
                                + iΔx^2 * (η.c[i-1, j-1])
                                + 2γ * iΔy^2)
         end
