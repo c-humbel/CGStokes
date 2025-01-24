@@ -64,6 +64,112 @@ function tplSub!(this::NamedTuple, other::NamedTuple)
 end
 
 
+# copied from 2_augmentedLagrange/D_ManyInclusions_Egrid.jl
+function generate_inclusions(ninc, xs, ys, rng)
+    dx = xs[2] - xs[1]
+    dy = ys[2] - ys[1]
+    nx = length(xs)
+    ny = length(ys)
+    Lx = nx * dx
+    Ly = ny * dy
+
+    r_min = 2   * max(dx, dy)
+    r_max = 0.1 * min(Lx, Ly)
+
+    # generate random radii
+    rs = r_min .+ (r_max - r_min) .* rand(rng, ninc)
+
+    # generate random positions for non-overlapping circles
+    xcs = zeros(ninc)
+    ycs = zeros(ninc)
+    i = 1
+    while i <= ninc
+        # generate guess
+        xcs[i] = rand(rng, xs[end÷5:4end÷5])
+        ycs[i] = rand(rng, ys[end÷5:4end÷5])
+        # check that cicles are not overlapping with existing ones
+        j = 1
+        while j < i
+            if (xcs[i] - xcs[j])^2 + (ycs[i] - ycs[j])^2 < (rs[i] + rs[j] + 2r_min)^2
+                break
+            end
+            j += 1
+        end     
+        if j == i
+            i += 1
+        end 
+    end
+    return zip(xcs, ycs), rs
+end
+
+# copied from 2_augmentedLagrange/D_ManyInclusions_Egrid.jl
+function initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly; seed=1234, ninc=5)
+    rng = MersenneTwister(seed)
+
+    # generate radius and location inclusions
+    centers, radii = generate_inclusions(ninc, xc, yc, rng)
+
+    # generate relative viscosity for inclusions
+    η_ratios = fill(η_ratio, ninc)
+    offsets = rand(rng, ninc-1) .* (η_ratio / 2)
+    if η_ratio > 1
+        η_ratios[2:end] .-= offsets
+    elseif η_ratio < 1
+        η_ratios[2:end] .+= offsets
+    end
+    shuffle!(rng, η_ratios)
+
+    # area of inclusions
+    As = [π*r^2 for r in radii]
+    A_inc = sum(As)
+    A_tot = Lx * Ly
+
+    # matrix viscosity
+    η_mat = η_avg * A_tot / (sum(As .* η_ratios) + A_tot - A_inc)
+
+    # body force
+    Δρg   = ρg_avg * A_tot / A_inc
+
+    # set viscosity and body force values
+    η_loc  = (c=Array(η.c), v=Array(η.v))
+    ρg_loc = (c=Array(ρg.c), v=Array(ρg.v))
+    η_loc.c  .= η_mat
+    η_loc.v  .= η_mat
+    ρg_loc.c .= 0.
+    ρg_loc.v .= 0.
+    for j = eachindex(yc)
+        for i = eachindex(xc)
+            for ((x, y), r, η_rel) ∈ zip(centers, radii, η_ratios)
+                if (xc[i] - x)^2 + (yc[j] - y)^2 <= r^2
+                    η_loc.c[i, j]  = η_rel * η_mat
+                    ρg_loc.c[i, j] = Δρg
+                    break
+                end
+            end
+        end
+    end
+
+    for j = eachindex(yv)
+        for i = eachindex(xv)
+            for ((x, y), r, η_rel) ∈ zip(centers, radii, η_ratios)
+                if (xv[i] - x)^2 + (yv[j] - y)^2 <= r^2
+                    η_loc.v[i, j]  = η_rel * η_mat
+                    ρg_loc.v[i, j] = Δρg
+                    break
+                end
+            end
+        end
+    end
+    
+    copyto!(η.c, η_loc.c)
+    copyto!(η.v, η_loc.v)
+    copyto!(ρg.c, ρg_loc.c)
+    copyto!(ρg.c, ρg_loc.v)
+
+    return nothing
+end
+
+
 # dimensions for kernel launch: nx+1, ny+1
 @kernel inbounds=true function compute_divV!(divV, V, iΔx, iΔy)
     i, j = @index(Global, NTuple)
@@ -387,7 +493,6 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
     q = 1. + 1/3  
 
     Lx = Ly = L_ref
-    R_in  = 0.1 * L_ref
     nx = ny = n
     ϵ̇_bg = eps()
 
@@ -397,25 +502,14 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
     xv = LinRange(-0.5Lx, 0.5Lx, nx+1)
     yv = LinRange(-0.5Ly, 0.5Ly, ny+1)
 
-    A_in  = π * R_in^2
-    A_tot = Lx * Ly
-    η_out = η_avg * A_tot / (A_tot + (η_ratio - 1)*A_in)
-    η_in  = η_out * η_ratio
-    # body force
-    Δρg   = ρg_avg * A_tot / A_in
-
 
     # field initialisation
-    ρg   = (c=[x^2 + y^2 < R_in^2 ? Δρg : 0. for x=xc, y=yc],
-            v=[x^2 + y^2 < R_in^2 ? Δρg : 0. for x=xv, y=yv])
-
-    B    = (c=[x^2 + y^2 < R_in^2 ? η_in : η_out for x=xc, y=yc],
-            v=[x^2 + y^2 < R_in^2 ? η_in : η_out for x=xv, y=yv])
-
     P    = (c=zeros(nx, ny), v=zeros(nx+1, ny+1))
     P₀   = deepcopy(P)  # old pressure
     P̄    = deepcopy(P)  # memory needed for auto-differentiation
     divV = deepcopy(P)
+    ρg   = deepcopy(P)
+    B    = deepcopy(P)
     η    = deepcopy(P)  # viscosity
     η̄    = deepcopy(P)  # memory needed for auto-differentiation
     V    = (xc=zeros(nx+1, ny), yc=zeros(nx, ny+1), xv=zeros(nx+2, ny+1), yv=zeros(nx+1, ny+2))
@@ -427,7 +521,9 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
     Q    = deepcopy(V)  # Jacobian of compute_R wrt. V, multiplied by some vector (used for autodiff)
     invM = deepcopy(V)  # preconditioner, cells correspoinding to Dirichlet BC are zero
     
-    
+    initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly)
+
+
     # Coefficient of augmented Lagrangian
     γ = γ_factor * tplNorm(B, Inf)
 
