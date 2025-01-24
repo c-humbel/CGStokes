@@ -3,7 +3,7 @@ using ColorSchemes
 using Enzyme
 using Random
 
-include("../../src/tuple_manip.jl")
+include("../src/tuple_manip.jl")
 
 # copied from 2_augmentedLagrange/D_ManyInclusions_Egrid.jl
 function generate_inclusions(ninc, xs, ys, rng)
@@ -104,28 +104,8 @@ function initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, L
     return nothing
 end
 
-function compute_divV!(divV, V, dx, dy)
-    nx, ny = size(divV.c)
-    for j = 1:ny
-        for i = 1:nx
-            dVx = (V.xc[i+1, j] - V.xc[i, j]) / dx
-            dVy = (V.yc[i, j+1] - V.yc[i, j]) / dy
-            divV.c[i, j] = dVx + dVy
-        end
-    end
 
-    for j = 1:ny+1
-        for i = 1:nx+1
-            dVx = (V.xv[i+1, j] - V.xv[i, j]) / dx
-            dVy = (V.yv[i, j+1] - V.yv[i, j]) / dy
-            divV.v[i, j] = dVx + dVy
-        end
-    end
-
-    return nothing
-end
-
-function compute_R!(R, P, η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
+function compute_R!(R, P, η, V, ρg, B, q, ϵ̇_bg, dx, dy)
     nx, ny = size(P.c)
 
     ### Dirichlet boundary conditions
@@ -150,13 +130,13 @@ function compute_R!(R, P, η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
         V.yv[i, end] = 0.
     end
 
-    ### pressure and viscosity update
+    ### pressure residual and viscosity update
     for j = 1:ny
         for i = 1:nx
             dVxdx = (V.xc[i+1, j] - V.xc[i, j]) / dx 
             dVydy = (V.yc[i, j+1] - V.yc[i, j]) / dy
 
-            P.c[i, j] = P₀.c[i, j] - γ * (dVxdx + dVydy)
+            R.pc[i, j] = dVxdx + dVydy
 
             dVxdy_dVydx = 0.5*((V.xv[i+1, j+1] - V.xv[i+1, j]) / dy + (V.yv[i+1, j+1] - V.yv[i, j+1]) / dx)
             
@@ -171,7 +151,7 @@ function compute_R!(R, P, η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
             dVxdx = (V.xv[i+1, j] - V.xv[i, j]) / dx
             dVydy = (V.yv[i, j+1] - V.yv[i, j]) / dy
 
-            P.v[i, j] = P₀.v[i, j] - γ * (dVxdx + dVydy)
+            R.pv[i, j] = dVxdx + dVydy
 
             dVxdy = 1 < j < ny+1 ? 0.5 * (V.xc[i, j] - V.xc[i, j-1]) / dy : 0.  # gradient of wall parallel velocity is zero
             dVydx = 1 < i < nx+1 ? 0.5 * (V.yc[i, j] - V.yc[i-1, j]) / dx : 0.  # gradient of wall parallel velocity is zero
@@ -314,11 +294,19 @@ function update_D!(D, R, invM, β)
             D.yv[i, j] = invM.yv[i, j] * R.yv[i, j] + β * D.yv[i, j]
         end
     end
+
+    for I = eachindex(D.pc)
+        D.pc[I] = R.pc[I] + β * D.pc[I]
+    end
+
+    for I = eachindex(D.pv)
+        D.pv[I] = R.pv[I] + β * D.pv[I]
+    end
     return nothing
 end
 
 
-function update_V!(V, D, α)
+function update_P_V!(P, V, D, α)
     for j = 1:size(V.xc, 2)
         for i = 2:size(V.xc, 1)-1
             V.xc[i, j] += α * D.xc[i, j]
@@ -341,106 +329,40 @@ function update_V!(V, D, α)
             V.yv[i, j] += α * D.yv[i, j]
         end
     end
+
+    for I = eachindex(P.c)
+        P.c[I] += α * D.pc[I]
+    end
+    for I = eachindex(P.v)
+        P.v[I] += α * D.pv[I]
+    end
+
     return nothing
 end
 
 
-function initialise_invM(invM, η, dx, dy, γ)
-    nx, ny = size(η.c)
-
-    ## inner points
-    # x direction, cell centers
-    for j = 2:ny-1
-        for i = 2:nx
-            mij = ( 2 / dx^2 * (η.c[i-1, j] + η.c[i, j  ])
-                  + 1 / dy^2 * (η.v[i  , j] + η.v[i, j+1])
-                  + 2 * γ / dx^2)
-            invM.xc[i, j] = inv(mij)
-        end
-    end
-
-    # y direction, cell centers
-    for j = 2:ny
-        for i = 2:nx-1
-            mij = ( 2 / dy^2 * (η.c[i, j-1] + η.c[i  , j])
-                  + 1 / dx^2 * (η.v[i, j  ] + η.v[i+1, j])
-                  + 2 * γ / dy^2)
-            invM.yc[i, j] = inv(mij)
-        end
-    end
-
-    # x direction, vertices
-    for j = 2:ny
-        for i = 2:nx+1
-            mij = ( 2 / dx^2 * (η.v[i-1, j  ] + η.v[i  , j])
-                  + 1 / dy^2 * (η.c[i-1, j-1] + η.c[i-1, j])
-                  + 2 * γ / dx^2)
-            invM.xv[i, j] = inv(mij)
-        end
-    end
-
-    # y direction, vertices
-    for j=2:ny+1
-        for i=2:nx
-            mij = ( 2 / dy^2 * (η.v[i  , j-1] + η.v[i, j  ])
-                  + 1 / dx^2 * (η.c[i-1, j-1] + η.c[i, j-1])
-                  + 2 * γ / dy^2)
-            invM.yv[i, j] = inv(mij)
-        end
-    end
-
-    ## Neumann boundary points
-    # x direction, cell centers
-    for i = 2:nx
-        invM.xc[i, 1 ] = inv( 2 / dx^2 * (η.c[i-1, 1] + η.c[i, 1])
-                            + 1 / dy^2 * (η.v[i, 2])
-                            + 2 * γ / dx^2)
-        invM.xc[i, ny] = inv( 2 / dx^2 * (η.c[i-1, ny] + η.c[i, ny])
-                            + 1 / dy^2 * η.v[i, ny]
-                            + 2 * γ / dx^2)
-    end
-    # y direction, cell centers
-    for j = 2:ny
-        invM.yc[1 , j] = inv( 2 / dy^2 * (η.c[1, j-1] + η.c[1, j])
-                            + 1 / dx^2 * (η.v[2, j])
-                            + 2 * γ / dy^2)
-        invM.yc[nx, j] = inv( 2 / dy^2  * (η.c[nx, j-1] + η.c[nx, j])
-                            + 1 / dx^2 * (η.v[nx, j])
-                            + 2 * γ / dy^2)
-    end
-    # x direction, vertices
-    for i = 2:nx+1
-        invM.xv[i, 1   ] = inv( 2 / dx^2 * (η.v[i-1, 1] + η.v[i, 1])
-                              + 1 / dy^2 * (η.c[i-1, 1])
-                              + 2 * γ / dx^2)
-        invM.xv[i, ny+1] = inv( 2 / dx^2 * (η.v[i-1, ny+1] + η.v[i, ny+1])
-                              + 1 / dy^2 * (η.c[i-1, ny  ])
-                              + 2 * γ / dx^2)
-    end
-    # y direction, vertices
-    for j = 2:ny+1
-        invM.yv[1   , j] = inv( 2 / dy^2 * (η.v[1, j-1] + η.v[1, j])
-                              + 1 / dx^2 * (η.c[1, j-1])
-                              + 2 * γ / dy^2)
-        invM.yv[nx+1, j] = inv( 2 / dy^2 * (η.v[nx+1, j-1] + η.v[nx+1, j])
-                              + 1 / dx^2 * (η.c[nx  , j-1])
-                              + 2 * γ / dy^2)
-    end
-
-    ## Dirichlet boundary points, leave zero
-
+function initialise_invM(invM, η, dx, dy)
+    # currently no preconditioner
+    invM.xc .= 1.
+    invM.yc .= 1.
+    invM.xv .= 1.
+    invM.yv .= 1.
+    invM.pc .= 1.
+    invM.pv .= 1.
     return nothing
     
 end
 
 
-function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_factor=1.,
-                            ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, verbose=false)
+function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, nnewton=10,
+                            ϵ_cg=1e-3, ϵ_nt=1e-2)
     L_ref =  1. # reference length 
     ρg_avg = 1. # average density
 
-    B_avg = 1. 
-    q = 1. + 1/3
+    # physical parameters would be: n == 3, A = (24 * 1e-25) in Glen's law, see Cuffrey and Paterson (2006), table 3.3
+    # and q = 1. + 1/n, η_avg = (24 * 1e-25) ^ (-1/n), see Schoof (2006)
+    η_avg = 1. 
+    q = 1. + 1/3  
 
     Lx = Ly = L_ref
     nx = ny = n
@@ -457,39 +379,26 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     B    = (c=zeros(nx, ny), v=zeros(nx+1, ny+1))
 
     P    = (c=zeros(nx, ny), v=zeros(nx+1, ny+1))
-    P₀   = deepcopy(P)  # old pressure
     P̄    = deepcopy(P)  # memory needed for auto-differentiation
-    divV = deepcopy(P)
     η    = deepcopy(P)  # viscosity
     η̄    = deepcopy(P)  # memory needed for auto-differentiation
     V    = (xc=zeros(nx+1, ny), yc=zeros(nx, ny+1), xv=zeros(nx+2, ny+1), yv=zeros(nx+1, ny+2))
-    dV   = deepcopy(V)  # velocity updates in Newton iteration
-    V̄    = deepcopy(V)  # memory needed for auto-differentiation
-    D    = deepcopy(V)  # search direction of CG, cells affecting Dirichlet BC are zero
-    R    = deepcopy(V)  # nonlinear Residual
-    K    = deepcopy(V)  # Residuals in CG
-    Q    = deepcopy(V)  # Jacobian of compute_R wrt. V, multiplied by some vector (used for autodiff)
-    invM = deepcopy(V)  # preconditioner, cells correspoinding to Dirichlet BC are zero
+    V̄    = deepcopy(V) # memory needed for auto-differentiation
+    D    = (xc=zeros(nx+1, ny), yc=zeros(nx, ny+1),
+            xv=zeros(nx+2, ny+1), yv=zeros(nx+1, ny+2),
+            pc=zeros(nx, ny), pv=zeros(nx+1, ny+1))  # search direction of CG, cells affecting Dirichlet BC are zero
+    R    = deepcopy(D)  # nonlinear Residual
+    Q    = deepcopy(D)  # Jacobian of compute_R wrt. V, multiplied by some vector (used for autodiff)
+    invM = deepcopy(D)  # preconditioner, cells correspoinding to Dirichlet BC are zero
     
-    initialise_η_ρ!(B, ρg, B_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly, ninc=ninc)
+    initialise_η_ρ!(B, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly, ninc=ninc)
 
-    # Coefficient of augmented Lagrangian
-    γ = γ_factor * tplNorm(B, Inf)
-
-    # damping parameter for newton iteration
-    λ = 1.
-
-    # residual norms for monitoring convergence
-    δ = Inf # CG
-    χ = Inf # Newton
-    ω = Inf # Pressure
 
     δ_ref = tplNorm(ρg, Inf) # is this correct ?
-    ω_ref = ρg_avg * Lx / B_avg
 
     # visualisation
     fig = Figure(size=(800,600))
-    axs = (Eta=Axis(fig[1,1][1,1], aspect=1, title="viscosity (log)"), P=Axis(fig[1,2][1,1], aspect=1, title="pressure"),
+    axs = (Eta=Axis(fig[1,1][1,1], aspect=1, title="viscosity"), P=Axis(fig[1,2][1,1], aspect=1, title="pressure"),
            Vx=Axis(fig[2,1][1,1], aspect=1, title="horizontal velocity"), Vy=Axis(fig[2,2][1,1], aspect=1, title="vertical velocity"))
     plt = (Eta=heatmap!(axs.Eta, η.c, colormap=ColorSchemes.viridis),
            P=heatmap!(axs.P, P.c, colormap=ColorSchemes.viridis),
@@ -502,82 +411,59 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
     display(fig)
 
-    # Powell Hestenes
+    # CG
+    compute_R!(R, P, η, V, ρg, B, q, ϵ̇_bg, dx, dy)
+    tplSet!(D, R)
+    δ = tplNorm(R, Inf) / δ_ref
+    μ = tplNorm(R)
+
     it = 0
-    while it < niter && ω > ϵ_ph
-        verbose && println("Iteration ", it_P)
-        tplSet!(P₀, P)
+    while it < niter && δ > ϵ_cg
+        println("cg iteration ", it + 1)
+        # compute α
+        it_nt = 0
+        α = Inf
+        ν = tplNorm(D)
+        while it_nt < nnewton && α * ν > ϵ_nt
+            V̄.xc .= D.xc
+            V̄.yc .= D.yc
+            V̄.xv .= D.xv
+            V̄.yv .= D.yv
+            P̄.c  .= D.pc
+            P̄.v  .= D.pv
 
-        compute_R!(R, P, η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
-
-        χ = tplNorm(R, Inf) / δ_ref
-
-        # Newton iteration
-        while it < niter && χ > ϵ_newton
-            # initialise preconditioner
-            initialise_invM(invM, η, dx, dy, γ)
-
-            # iteration zero
-            # compute residual for CG, K = R - DR * dV
-            tplSet!(V̄, dV)
             autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Q),
-                     Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
-                     Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(dx), Const(dy), Const(γ))
-            tplSet!(K, R)
-            tplAdd!(K, Q)
+                    Duplicated(P, P̄), Duplicated(η, η̄), Duplicated(V, V̄),
+                    Const(ρg), Const(B), Const(q), Const(ϵ̇_bg),
+                    Const(dx), Const(dy))
 
-            tplSet!(D, K, invM)
-            μ = tplDot(K, D)
-            δ = tplNorm(K, Inf) / δ_ref
-            # start iteration
-            while it <= niter && δ > ϵ_cg
-                # compute α
-                tplSet!(V̄, D)
-                autodiff(Forward, compute_R!, DuplicatedNoNeed(K, Q),
-                     Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
-                     Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(dx), Const(dy), Const(γ))
+            α = - tplDot(R, D) / tplDot(D, Q)
+            
+            #α < 0 && println("\tα less than zero")
+            update_P_V!(P, V, D, α)
 
-                α = - μ / tplDot(D, Q)
+            compute_R!(R, P, η, V, ρg, B, q, ϵ̇_bg, dx, dy)
+            it_nt += 1
+        end
+        println("\t", it_nt, " newton iterations, α * ν = ", α * ν)
 
-                update_V!(dV, D, α)
+        μ_new = tplNorm(R)
+        β = μ_new / μ
+        μ = μ_new
 
-                # recompute residual
-                tplSet!(V̄, dV)
-                autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Q),
-                         Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
-                         Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(dx), Const(dy), Const(γ))
-                tplSet!(K, R)
-                tplAdd!(K, Q)
+        update_D!(D, R, invM, β)
 
+        δ = tplNorm(R, Inf) / δ_ref
+        println("\tresidual = ", δ)
 
-                μ_new = tplDot(K, K, invM)
-                β = μ_new / μ
-                μ = μ_new
-                update_D!(D, K, invM, β)
+        if tplDot(R, D) <= 0
+            println("\tr ⋅ d less than zero")
+            tplSet!(D, R)
+        end
 
-                # compute residual norm
-                δ = tplNorm(K, Inf) / δ_ref # correct scaling?
-                it += 1
-            end
-            # damped to newton iteration
-            tplSet!(V̄, V)
-            # tplScale!(dV, λ)
-            tplAdd!(V̄, dV)
-            compute_R!(R, P,  η, P₀, V̄, ρg, B, q, ϵ̇_bg, dx, dy, γ)
-            χ_new = tplNorm(R, Inf) / δ_ref
-            λ = 1.
-            while χ_new >= χ
-                tplSet!(V̄, V)
-                tplScale!(dV, inv(MathConstants.golden))
-                tplAdd!(V̄, dV)
-                compute_R!(R, P, η, P₀, V̄, ρg, B, q, ϵ̇_bg, dx, dy, γ)
-                λ /= MathConstants.golden
-                χ_new = tplNorm(R, Inf) / δ_ref
-            end
-            tplSet!(V, V̄)
-            # λ *= MathConstants.golden
-            χ = χ_new
+        it += 1
 
+        if it % 10 == 0
             # update plot
             plt.Eta[3][] .= log10.(η.c)
             plt.P[3][]   .= P.c
@@ -587,14 +473,8 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             plt.P.colorrange[]  = (min(-1e-10,minimum(P.c)), max(1e-10, maximum(P.c)))
             plt.Vx.colorrange[] = (min(-1e-10,minimum(V.xc)), max(1e-10,maximum(V.xc)))
             plt.Vy.colorrange[] = (min(-1e-10,minimum(V.yc)), max(1e-10,maximum(V.yc)))
-
             display(fig)
-            
-            println("Newton residual = ", χ, "; λ =", λ, "; total iteration count: ", it)
-        end    
-        compute_divV!(divV, V, dx, dy)
-        ω = tplNorm(divV, Inf) / ω_ref # correct scaling?
-        println("Pressure residual = ", ω, ", Newton residual = ", χ, ", CG residual = ", δ)
+        end
     end
 
     return it, P, V, R, η
@@ -602,5 +482,5 @@ end
 
 
 n = 64
-outfields = nonlinear_inclusion(n=n, ninc=4, η_ratio=10.,γ_factor=100., niter=500*n, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4);
+outfields = nonlinear_inclusion(n=n, η_ratio=10., niter=10, ϵ_cg=1e-3, ϵ_nt=1e-12, ninc=1);
 

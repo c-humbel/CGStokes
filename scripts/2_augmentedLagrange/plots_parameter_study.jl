@@ -13,7 +13,7 @@ function load_data(filename, maxiter=5e5)
 
     for (i, line) ∈ enumerate(eachline(filename))
         if i == 1 continue end
-        η_ratio, max_η, min_η, γ_factor, γ, it, = split(line, ",")
+        η_ratio, max_η, min_η, γ_factor, γ, it = split(line, ",")
         push!(eta_ratios, parse(Float64, η_ratio))
         push!(gamma_factors, parse(Float64, γ_factor))
         push!(iterations, parse(Int, it))
@@ -41,7 +41,7 @@ end
 
 function create_plot_gamma_factors(etas, gamma_factors, iters; nx=128, logscale=true)
     n_etas = length(etas)
-    iters ./= nx
+    iters = iters ./ nx
 
     islg = ""
     if logscale
@@ -88,7 +88,7 @@ end
 
 function create_plot_gamma_values(etas, gammas, iters, nx=128, logscale=true)
     n_etas = length(etas)
-    iters ./= nx
+    iters = iters ./ nx
 
     islg = ""
     if logscale
@@ -97,23 +97,22 @@ function create_plot_gamma_values(etas, gammas, iters, nx=128, logscale=true)
         etas = log10.(etas)
         islg = " (log)"
     end
-    markersize=15
 
     colours = resample(ColorSchemes.viridis, 2n_etas + 1)[2:2:2n_etas]
     markers = [:circle, :diamond, :utriangle, :dtriangle, :ltriangle, :rtriangle, :cross, :rect, :star4, :pentagon, :star5, :hexagon, :star6] 
-    markersize=10
+    markersize=15
 
-    fig = Figure(size=(800, 800))
+    fig = Figure(size=(700, 800))
     lin = Axis(fig[1,1], xlabel="gamma" * islg, ylabel="iterations / nx"  * islg, title="Required Iterations for Several Inclusions")
     for (i, eta) = enumerate(etas)
-        scatterlines!(lin, gammas[:, i], iters[:, i] ./ nx, color=colours[i], marker=markers[i], markersize=markersize, label=@sprintf("%.e", eta))
+        scatterlines!(lin, gammas[:, i], iters[:, i], color=colours[i], marker=markers[i], markersize=markersize, label=string(eta))
     end
     Legend(fig[1,2], lin, "viscosity ratio" * islg, orientation=:vertical, framevisible=false, padding=(0, 0, 0, 0))
 
     hidexdecorations!(lin, ticks=false, grid=false)
 
     htmp = Axis(fig[2,1], xlabel="gamma" * islg, ylabel="viscosity ratio" * islg)
-    htmp_plot = scatter!(htmp, reshape(gammas, :), repeat(etas, inner=size(gammas, 1)), color=reshape(iters, :), markersize=48, marker=:rect)
+    htmp_plot = scatter!(htmp, reshape(gammas, :), repeat(etas, inner=size(gammas, 1)), color=reshape(iters, :), markersize=47, marker=:rect)
     Colorbar(fig[2,2], htmp_plot, label="iterations / nx" * islg)
 
     linkxaxes!(lin, htmp)
@@ -128,3 +127,23 @@ function create_plot_gamma_values(etas, gammas, iters, nx=128, logscale=true)
     return fig
 end
 
+
+function colapse_lines(etas, gammas, iters, b=1, nx=128, logscale=true)
+    iters = iters ./ nx
+
+    islg = ""
+    if logscale
+        gammas = log10.(gammas)
+        iters = log10.(iters)
+        etas = log10.(etas)
+        islg = " (log)"
+    end
+
+    fig = Figure(size=(700, 400))
+    ax = Axis(fig[1,1], xlabel="gamma" * islg, ylabel="η^$b iters / nx" * islg)
+    for (i, eta) = enumerate(etas)
+        scatterlines!(ax, gammas[:, i], iters[:, i] .+ (b * eta))
+    end
+
+    return fig
+end
