@@ -6,11 +6,10 @@ end
 
 
 function tplDot(x::NamedTuple, y::NamedTuple, a::NamedTuple)
+    mult(a1, a2, a3) = a1*a2*a3
     s = 0.
     for k = keys(x)
-        for I = eachindex(x[k])
-            s += (x[k][I] * a[k][I] * y[k][I])
-        end
+        s += mapreduce(mult, +, x[k], a[k], y[k])
     end
     return s
 end
@@ -30,9 +29,8 @@ function tplSet!(dest::NamedTuple, src::NamedTuple, a::NamedTuple)
 end
 
 
-function tplSet!(dest::NamedTuple, src::NamedTuple, a::Real=1.)
+function tplSet!(dest::NamedTuple, src::NamedTuple)
     copyto!.(values(dest), values(src))
-    tplScale!(dest, a)
     return nothing
 end
 
