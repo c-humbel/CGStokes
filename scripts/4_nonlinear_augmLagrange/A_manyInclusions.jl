@@ -2,7 +2,7 @@ using CairoMakie
 using ColorSchemes
 using Enzyme
 
-include("../src/tuple_manip.jl")
+include("../../src/tuple_manip.jl")
 
 
 function compute_divV!(divV, V, dx, dy)
