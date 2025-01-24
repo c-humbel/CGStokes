@@ -1,67 +1,9 @@
 using CairoMakie
 using ColorSchemes
-using LinearAlgebra
 using Enzyme
 using KernelAbstractions
 
-function tplNorm(x::NamedTuple, p::Real=2)
-    return norm(norm.(values(x), p), p)   
-end
-
-
-function tplDot(x::NamedTuple, y::NamedTuple, a::NamedTuple)
-    s = 0.
-    for k = keys(x)
-        for I = eachindex(x[k])
-            s += (x[k][I] * a[k][I] * y[k][I])
-        end
-    end
-    return s
-end
-
-
-function tplDot(x::NamedTuple, y::NamedTuple, a::Real=1.)
-    return a * sum(dot.(values(x), values(y)))
-end
-
-
-function tplSet!(dest::NamedTuple, src::NamedTuple, a::NamedTuple)
-    for k = keys(dest)
-        copyto!(dest[k], src[k])
-        dest[k] .*= a[k]
-    end
-    return nothing
-end
-
-
-function tplSet!(dest::NamedTuple, src::NamedTuple, a::Real=1.)
-    copyto!.(values(dest), values(src))
-    tplScale!(dest, a)
-    return nothing
-end
-
-
-function tplScale!(x::NamedTuple, a::Real)
-    for k = keys(x)
-        x[k] .*= a
-    end
-    return nothing
-end
-
-
-function tplAdd!(this::NamedTuple, other::NamedTuple)
-    for k = keys(this)
-        this[k] .+= other[k]
-    end
-    return nothing
-end
-
-function tplSub!(this::NamedTuple, other::NamedTuple)
-    for k = keys(this)
-        this[k] .-= other[k]
-    end
-    return nothing
-end
+include("../../src/tuple_manip.jl")
 
 
 # copied from 2_augmentedLagrange/D_ManyInclusions_Egrid.jl
@@ -383,7 +325,7 @@ end
     return nothing
 end
 
-
+# dimensions for kernel launch: nx+2, ny+2
 @kernel inbounds=true function initialise_invM(invM, η, iΔx, iΔy, γ)
     ## inner points
     # x direction, cell centers
@@ -478,8 +420,11 @@ end
 end
 
 
-function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
-                            ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, verbose=false)
+
+
+function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
+                            ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3,
+                            backend=CPU(), workgroup=64, type=Float64, verbose=false)
     L_ref =  1. # reference length 
     ρg_avg = 1. # average density
 
@@ -490,7 +435,7 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
 
     Lx = Ly = L_ref
     nx = ny = n
-    ϵ̇_bg = eps()
+    ϵ̇_bg = eps(type)
 
     dx, dy = Lx / nx, Ly / ny
     xc = LinRange(-0.5Lx + 0.5dx, 0.5Lx - 0.5dx, nx)
@@ -500,7 +445,8 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
 
 
     # field initialisation
-    P    = (c=zeros(nx, ny), v=zeros(nx+1, ny+1))
+    P    = (c=KernelAbstractions.zeros(backend, type, nx, ny),
+            v=KernelAbstractions.zeros(backend, type, nx+1, ny+1))
     P₀   = deepcopy(P)  # old pressure
     P̄    = deepcopy(P)  # memory needed for auto-differentiation
     divV = deepcopy(P)
@@ -508,7 +454,10 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
     B    = deepcopy(P)
     η    = deepcopy(P)  # viscosity
     η̄    = deepcopy(P)  # memory needed for auto-differentiation
-    V    = (xc=zeros(nx+1, ny), yc=zeros(nx, ny+1), xv=zeros(nx+2, ny+1), yv=zeros(nx+1, ny+2))
+    V    = (xc=KernelAbstractions.zeros(backend, type, nx+1, ny),
+            yc=KernelAbstractions.zeros(backend, type, nx, ny+1),
+            xv=KernelAbstractions.zeros(backend, type, nx+2, ny+1),
+            yv=KernelAbstractions.zeros(backend, type, nx+1, ny+2))
     dV   = deepcopy(V)  # velocity updates in Newton iteration
     V̄    = deepcopy(V)  # memory needed for auto-differentiation
     D    = deepcopy(V)  # search direction of CG, cells affecting Dirichlet BC are zero
@@ -518,10 +467,6 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
     invM = deepcopy(V)  # preconditioner, cells correspoinding to Dirichlet BC are zero
     
     initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly)
-
-
-    # Coefficient of augmented Lagrangian
-    γ = γ_factor * tplNorm(B, Inf)
 
     # residual norms for monitoring convergence
     δ = Inf # CG
@@ -535,16 +480,30 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
     fig = Figure(size=(600,400))
     axs = (Eta=Axis(fig[1,1][1,1], aspect=1), P=Axis(fig[1,2][1,1], aspect=1),
            Vx=Axis(fig[2,1][1,1], aspect=1), Vy=Axis(fig[2,2][1,1], aspect=1))
-    plt = (Eta=heatmap!(axs.Eta, η.c, colormap=ColorSchemes.viridis),
-           P=heatmap!(axs.P, P.c, colormap=ColorSchemes.viridis),
-           Vx=heatmap!(axs.Vx, V.xc, colormap=ColorSchemes.viridis),
-           Vy=heatmap!(axs.Vy, V.yc, colormap=ColorSchemes.viridis))
-    cbar= (Eta=Colorbar(fig[1, 1][1, 2], plt.Eta),
-           P=Colorbar(fig[1, 2][1, 2], plt.P),
-           Vx=Colorbar(fig[2, 1][1, 2], plt.Vx),
-           Vy=Colorbar(fig[2, 2][1, 2], plt.Vy))
+    plt = (Eta=heatmap!(axs.Eta, Array(η.c), colormap=ColorSchemes.viridis),
+           P=heatmap!(axs.P, Array(P.c), colormap=ColorSchemes.viridis),
+           Vx=heatmap!(axs.Vx, Array(V.xc), colormap=ColorSchemes.viridis),
+           Vy=heatmap!(axs.Vy, Array(V.yc), colormap=ColorSchemes.viridis))
+    Colorbar(fig[1, 1][1, 2], plt.Eta)
+    Colorbar(fig[1, 2][1, 2], plt.P),
+    Colorbar(fig[2, 1][1, 2], plt.Vx),
+    Colorbar(fig[2, 2][1, 2], plt.Vy)
 
     display(fig)
+
+    # create Kernels
+    init_invM! = initialise_invM(backend, workgroup, (nx+2, ny+2))
+    comp_R!    = compute_R!(backend, workgroup, (nx+2, ny+2))
+    up_D!      = update_D!(backend, workgroup, (nx+2, ny+2))
+    up_V!      = update_V!(backend, workgroup, (nx+2, ny+2))
+    comp_divV! = compute_divV!(backend, workgroup, (nx+1, ny+1))
+
+    # Jacobian vector product of residual computation
+    compute_jvp!(R, Q, P, P̄, η, η̄, P₀, V, V̄, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ) = begin
+        autodiff_deferred(Forward, comp_R!, DuplicatedNoNeed(R, Q), Duplicated(P, P̄),
+                 Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄), Const(ρg), Const(B),
+                 Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
+    end
 
     # Powell Hestenes
     it = 0
@@ -552,14 +511,14 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
         verbose && println("Iteration ", it_P)
         tplSet!(P₀, P)
 
-        compute_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
+        comp_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ, ndrange=(nx+2, ny+2))
 
         χ = tplNorm(R, Inf) / δ_ref
 
         # Newton iteration
         while it < niter && χ > ϵ_newton
             # initialise preconditioner
-            initialise_invM(invM, η, dx, dy, γ)
+            init_invM!(invM, η, dx, dy, γ, ndrange=(nx+2, ny+2))
 
             # iteration zero
             # compute residual for CG, K = R - DR * dV
@@ -581,9 +540,9 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
                      Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
                      Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(dx), Const(dy), Const(γ))
 
-                α = μ / tplDot(D, Q, -1.)
+                α = - μ / tplDot(D, Q)
 
-                update_V!(dV, D, α)
+                up_V!(dV, D, α, ndrange=(nx+2, ny+2))
 
                 # recompute residual
                 tplSet!(V̄, dV)
@@ -597,7 +556,7 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
                 μ_new = tplDot(K, K, invM)
                 β = μ_new / μ
                 μ = μ_new
-                update_D!(D, K, invM, β)
+                up_D!(D, K, invM, β, ndrange=(nx+2, ny+2))
 
                 # compute residual norm
                 δ = tplNorm(K, Inf) / δ_ref # correct scaling?
@@ -620,11 +579,11 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ_factor=1.,
 
             display(fig)
 
-            compute_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
+            comp_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ, ndrange=(nx+2, ny+2))
             χ = tplNorm(R, Inf) / δ_ref # correct scaling?
             println("Newton residual = ", χ, "; total iteration count: ", it)
         end    
-        compute_divV!(divV, V, dx, dy)
+        comp_divV!(divV, V, dx, dy, ndrange=(nx+1, ny+1))
         ω = tplNorm(divV, Inf) / ω_ref # correct scaling?
         println("Pressure residual = ", ω, ", Newton residual = ", χ, ", CG residual = ", δ)
     end
