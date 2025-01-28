@@ -470,6 +470,8 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     K    = deepcopy(V)  # Residuals in CG
     Q    = deepcopy(V)  # Jacobian of compute_R wrt. V, multiplied by some vector (used for autodiff)
     invM = deepcopy(V)  # preconditioner, cells correspoinding to Dirichlet BC are zero
+
+    ϵ̇_E  = zeros(nx, ny) # strain rate invariant, computed only for cell centers
     
     initialise_η_ρ!(B, ρg, B_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly, ninc=ninc)
 
@@ -488,19 +490,29 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     ω_ref = ρg_avg * Lx / B_avg
 
     # visualisation
-    fig = Figure(size=(800,600))
-    axs = (Eta=Axis(fig[1,1][1,1], aspect=1, title="viscosity (log)"), P=Axis(fig[1,2][1,1], aspect=1, title="pressure"),
-           Vx=Axis(fig[2,1][1,1], aspect=1, title="horizontal velocity"), Vy=Axis(fig[2,2][1,1], aspect=1, title="vertical velocity"))
+    itercounts = []
+    res_newton = []
+
+    fig = Figure(size=(800,900))
+    axs = (Eta=Axis(fig[1,1][1,1], aspect=1, title="viscosity (log)"),
+           P =Axis(fig[1,2][1,1], aspect=1, title="pressure"),
+           Vx=Axis(fig[2,1][1,1], aspect=1, title="horizontal velocity"),
+           Vy=Axis(fig[2,2][1,1], aspect=1, title="vertical velocity"),
+           Sr=Axis(fig[3,1][1,1], aspect=1, title="strain rate"),
+           Er=Axis(fig[3,2][1,1], title="Convergence of Newton Method", xlabel="iterations / nx", ylabel="residual norm"))
     plt = (Eta=heatmap!(axs.Eta, η.c, colormap=ColorSchemes.viridis),
            P=heatmap!(axs.P, P.c, colormap=ColorSchemes.viridis),
            Vx=heatmap!(axs.Vx, V.xc, colormap=ColorSchemes.viridis),
-           Vy=heatmap!(axs.Vy, V.yc, colormap=ColorSchemes.viridis))
+           Vy=heatmap!(axs.Vy, V.yc, colormap=ColorSchemes.viridis),
+           Sr=heatmap!(axs.Sr, ϵ̇_E, colormap=ColorSchemes.viridis))
     cbar= (Eta=Colorbar(fig[1, 1][1, 2], plt.Eta),
            P=Colorbar(fig[1, 2][1, 2], plt.P),
            Vx=Colorbar(fig[2, 1][1, 2], plt.Vx),
-           Vy=Colorbar(fig[2, 2][1, 2], plt.Vy))
+           Vy=Colorbar(fig[2, 2][1, 2], plt.Vy),
+           Sr=Colorbar(fig[3, 1][1, 2], plt.Sr))
 
     display(fig)
+
 
     # Powell Hestenes
     it = 0
@@ -566,7 +578,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             compute_R!(R, P,  η, P₀, V̄, ρg, B, q, ϵ̇_bg, dx, dy, γ)
             χ_new = tplNorm(R, Inf) / δ_ref
             λ = 1.
-            while χ_new >= χ
+            while χ_new >= χ && λ > 1e-4
                 tplSet!(V̄, V)
                 tplScale!(dV, inv(MathConstants.golden))
                 tplAdd!(V̄, dV)
@@ -578,15 +590,23 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             # λ *= MathConstants.golden
             χ = χ_new
 
+            push!(itercounts, it)
+            push!(res_newton, χ)
+
             # update plot
+            compute_strain_rate!(ϵ̇_E, V, dx, dy, ϵ̇_bg)
             plt.Eta[3][] .= log10.(η.c)
             plt.P[3][]   .= P.c
             plt.Vx[3][]  .= V.xc
             plt.Vy[3][]  .= V.yc
+            plt.Sr[3][]  .= log10.(ϵ̇_E)
             plt.Eta.colorrange[]= (min(-1,log10(minimum(η.c))), max(1,log10(maximum(η.c))))
             plt.P.colorrange[]  = (min(-1e-10,minimum(P.c)), max(1e-10, maximum(P.c)))
             plt.Vx.colorrange[] = (min(-1e-10,minimum(V.xc)), max(1e-10,maximum(V.xc)))
             plt.Vy.colorrange[] = (min(-1e-10,minimum(V.yc)), max(1e-10,maximum(V.yc)))
+            plt.Sr.colorrange[]= (min(-1,log10(minimum(ϵ̇_E))), max(1,log10(maximum(ϵ̇_E))))
+
+            scatterlines!(axs.Er, itercounts ./ nx, log10.(res_newton), color=:purple)
 
             display(fig)
             
@@ -601,6 +621,22 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 end
 
 
-n = 64
-outfields = nonlinear_inclusion(n=n, ninc=4, η_ratio=10.,γ_factor=100., niter=500*n, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4);
+function compute_strain_rate!(ϵ̇_E, V, dx, dy, ϵ̇_bg=eps())
+    nx, ny = size(ϵ̇_E)
 
+    for j = 1:ny
+        for i = 1:nx
+            dVxdx = (V.xc[i+1, j] - V.xc[i, j]) / dx 
+            dVydy = (V.yc[i, j+1] - V.yc[i, j]) / dy
+            dVxdy_dVydx = 0.5*((V.xv[i+1, j+1] - V.xv[i+1, j]) / dy + (V.yv[i+1, j+1] - V.yv[i, j+1]) / dx)
+            
+            ϵ̇_E[i, j] = (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2)
+
+
+        end
+    end
+end
+
+
+n = 128
+outfields = nonlinear_inclusion(n=n, ninc=4, η_ratio=10.,γ_factor=100., niter=2000*n, ϵ_ph=1e-5, ϵ_cg=1e-5, ϵ_newton=1e-5);
