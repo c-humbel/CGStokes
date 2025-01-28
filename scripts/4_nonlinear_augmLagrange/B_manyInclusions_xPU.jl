@@ -2,6 +2,7 @@ using CairoMakie
 using ColorSchemes
 using Enzyme
 using KernelAbstractions
+using Random
 
 include("../../src/tuple_manip.jl")
 
@@ -106,7 +107,7 @@ function initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, L
     copyto!(η.c, η_loc.c)
     copyto!(η.v, η_loc.v)
     copyto!(ρg.c, ρg_loc.c)
-    copyto!(ρg.c, ρg_loc.v)
+    copyto!(ρg.v, ρg_loc.v)
 
     return nothing
 end
@@ -127,8 +128,6 @@ end
         dVy = (V.yv[i, j+1] - V.yv[i, j]) * iΔy
         divV.v[i, j] = dVx + dVy
     end
-
-    return nothing
 end
 
 # dimensions for kernel launch: nx+2, ny+2
@@ -279,7 +278,6 @@ end
     end
 
     # Residuals corresponding to cells affected by Dirichlet BC are left zero
-    return nothing
 end
 
 # dimensions for kernel launch: nx+2, ny+2
@@ -289,25 +287,23 @@ end
         D.xc[i, j] = invM.xc[i, j] * R.xc[i, j] + β * D.xc[i, j]
     end
 
-    if i <= size(D.yc, 1) && 1 < y < size(D.yc, 2)
+    if i <= size(D.yc, 1) && 1 < j < size(D.yc, 2)
         D.yc[i, j] = invM.yc[i, j] * R.yc[i, j] + β * D.yc[i, j]
     end
 
-    if 1 < i < size(D.xv, 1) && y < size(D.xv, 2)
+    if 1 < i < size(D.xv, 1) && j < size(D.xv, 2)
         D.xv[i, j] = invM.xv[i, j] * R.xv[i, j] + β * D.xv[i, j]
     end
 
-    if i < y < size(D.yv, 1) && 1 < j < size(D.yv, 2)
+    if i <= size(D.yv, 1) && 1 < j < size(D.yv, 2)
         D.yv[i, j] = invM.yv[i, j] * R.yv[i, j] + β * D.yv[i, j]
     end
-
-    return nothing
 end
 
 # dimensions for kernel launch: nx+2, ny+2
 @kernel inbounds=true function update_V!(V, D, α)
     i, j = @index(Global, NTuple)
-    if 1 < i < size(V.xc, 1)&& j <= :size(V.xc, 2)
+    if 1 < i < size(V.xc, 1) && j <= size(V.xc, 2)
         V.xc[i, j] += α * D.xc[i, j]
     end
 
@@ -322,11 +318,11 @@ end
     if i <= size(V.yv, 1) && 1 < j <size(V.yv, 2)
         V.yv[i, j] += α * D.yv[i, j]
     end
-    return nothing
 end
 
 # dimensions for kernel launch: nx+2, ny+2
 @kernel inbounds=true function initialise_invM(invM, η, iΔx, iΔy, γ)
+    i, j = @index(Global, NTuple)
     ## inner points
     # x direction, cell centers
     if 1 < i < size(invM.xc, 1) && 1 < j < size(invM.xc, 2)
@@ -413,10 +409,7 @@ end
         end
     end
 
-    ## Dirichlet boundary points, leave zero
-
-    return nothing
-    
+    ## Dirichlet boundary points, leave zero    
 end
 
 
@@ -437,9 +430,10 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
     nx = ny = n
     ϵ̇_bg = eps(type)
 
-    dx, dy = Lx / nx, Ly / ny
-    xc = LinRange(-0.5Lx + 0.5dx, 0.5Lx - 0.5dx, nx)
-    yc = LinRange(-0.5Ly + 0.5dy, 0.5Ly - 0.5dy, ny)
+    Δx,  Δy  = Lx / nx, Ly / ny
+    iΔx, iΔy = inv(Δx), inv(Δy)
+    xc = LinRange(-0.5Lx + 0.5Δx, 0.5Lx - 0.5Δx, nx)
+    yc = LinRange(-0.5Ly + 0.5Δy, 0.5Ly - 0.5Δy, ny)
     xv = LinRange(-0.5Lx, 0.5Lx, nx+1)
     yv = LinRange(-0.5Ly, 0.5Ly, ny+1)
 
@@ -498,12 +492,6 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
     up_V!      = update_V!(backend, workgroup, (nx+2, ny+2))
     comp_divV! = compute_divV!(backend, workgroup, (nx+1, ny+1))
 
-    # Jacobian vector product of residual computation
-    compute_jvp!(R, Q, P, P̄, η, η̄, P₀, V, V̄, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ) = begin
-        autodiff_deferred(Forward, comp_R!, DuplicatedNoNeed(R, Q), Duplicated(P, P̄),
-                 Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄), Const(ρg), Const(B),
-                 Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
-    end
 
     # Powell Hestenes
     it = 0
@@ -511,21 +499,21 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
         verbose && println("Iteration ", it_P)
         tplSet!(P₀, P)
 
-        comp_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ, ndrange=(nx+2, ny+2))
+        comp_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
 
         χ = tplNorm(R, Inf) / δ_ref
 
         # Newton iteration
         while it < niter && χ > ϵ_newton
             # initialise preconditioner
-            init_invM!(invM, η, dx, dy, γ, ndrange=(nx+2, ny+2))
+            init_invM!(invM, η, iΔx, iΔy, γ)
 
             # iteration zero
             # compute residual for CG, K = R - DR * dV
             tplSet!(V̄, dV)
-            autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Q),
+            autodiff(Forward, comp_R!, DuplicatedNoNeed(R, Q),
                      Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
-                     Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(dx), Const(dy), Const(γ))
+                     Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
             tplSet!(K, R)
             tplAdd!(K, Q)
 
@@ -536,19 +524,19 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
             while it <= niter && δ > ϵ_cg
                 # compute α
                 tplSet!(V̄, D)
-                autodiff(Forward, compute_R!, DuplicatedNoNeed(K, Q),
+                autodiff(Forward, comp_R!, DuplicatedNoNeed(K, Q),
                      Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
-                     Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(dx), Const(dy), Const(γ))
+                     Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
 
                 α = - μ / tplDot(D, Q)
 
-                up_V!(dV, D, α, ndrange=(nx+2, ny+2))
+                up_V!(dV, D, α)
 
                 # recompute residual
                 tplSet!(V̄, dV)
-                autodiff(Forward, compute_R!, DuplicatedNoNeed(R, Q),
+                autodiff(Forward, comp_R!, DuplicatedNoNeed(R, Q),
                          Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
-                         Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(dx), Const(dy), Const(γ))
+                         Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
                 tplSet!(K, R)
                 tplAdd!(K, Q)
 
@@ -556,7 +544,7 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
                 μ_new = tplDot(K, K, invM)
                 β = μ_new / μ
                 μ = μ_new
-                up_D!(D, K, invM, β, ndrange=(nx+2, ny+2))
+                up_D!(D, K, invM, β)
 
                 # compute residual norm
                 δ = tplNorm(K, Inf) / δ_ref # correct scaling?
@@ -579,11 +567,11 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
 
             display(fig)
 
-            comp_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ, ndrange=(nx+2, ny+2))
+            comp_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ,)
             χ = tplNorm(R, Inf) / δ_ref # correct scaling?
             println("Newton residual = ", χ, "; total iteration count: ", it)
         end    
-        comp_divV!(divV, V, dx, dy, ndrange=(nx+1, ny+1))
+        comp_divV!(divV, V, iΔx, iΔy,)
         ω = tplNorm(divV, Inf) / ω_ref # correct scaling?
         println("Pressure residual = ", ω, ", Newton residual = ", χ, ", CG residual = ", δ)
     end
@@ -592,5 +580,5 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
 end
 
 
-outfields = nonlinear_inclusion(n=64, niter=5000, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=0.5);
+outfields = nonlinear_inclusion(n=64, niter=5000, γ=10., ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=0.5);
 
