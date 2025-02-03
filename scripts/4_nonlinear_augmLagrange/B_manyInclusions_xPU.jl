@@ -47,7 +47,7 @@ function generate_inclusions(ninc, xs, ys, rng)
 end
 
 # copied from 2_augmentedLagrange/D_ManyInclusions_Egrid.jl
-function initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly; seed=1234, ninc=5)
+function initialise_B_ρ!(B, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly; seed=1234, ninc=5)
     rng = MersenneTwister(seed)
 
     # generate radius and location inclusions
@@ -75,7 +75,7 @@ function initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, L
     Δρg   = ρg_avg * A_tot / A_inc
 
     # set viscosity and body force values
-    η_loc  = (c=Array(η.c), v=Array(η.v))
+    η_loc  = (c=Array(B.c), v=Array(B.v))
     ρg_loc = (c=Array(ρg.c), v=Array(ρg.v))
     η_loc.c  .= η_mat
     η_loc.v  .= η_mat
@@ -105,8 +105,8 @@ function initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, L
         end
     end
     
-    copyto!(η.c, η_loc.c)
-    copyto!(η.v, η_loc.v)
+    copyto!(B.c, η_loc.c)
+    copyto!(B.v, η_loc.v)
     copyto!(ρg.c, ρg_loc.c)
     copyto!(ρg.v, ρg_loc.v)
 
@@ -114,7 +114,7 @@ function initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, L
 end
 
 
-function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
+function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_factor=1.,
                             ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3,
                             backend=CPU(), workgroup=64, type=Float64, verbose=false)
     L_ref =  1. # reference length 
@@ -142,11 +142,17 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
             v=KernelAbstractions.zeros(backend, type, nx+1, ny+1))
     P₀   = deepcopy(P)  # old pressure
     P̄    = deepcopy(P)  # memory needed for auto-differentiation
-    divV = deepcopy(P)
-    ρg   = deepcopy(P)
-    B    = deepcopy(P)
-    η    = deepcopy(P)  # viscosity
-    η̄    = deepcopy(P)  # memory needed for auto-differentiation
+    divV = deepcopy(P)  # velocity divergence
+    ρg   = deepcopy(P)  # body force
+    B    = deepcopy(P)  # prefactor of constituitive relation
+    ϵ̇_E  = deepcopy(P)  # invariant of strain rate
+    τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx, ny),
+               yy=KernelAbstractions.zeros(backend, type, nx, ny),
+               xy=KernelAbstractions.zeros(backend, type, nx, ny)),
+            v=(xx=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
+               yy=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
+               xy=KernelAbstractions.zeros(backend, type, nx+1, ny+1)))  # deviatoric stress tensor
+    τ̄    = deepcopy(τ)
     V    = (xc=KernelAbstractions.zeros(backend, type, nx+1, ny),
             yc=KernelAbstractions.zeros(backend, type, nx, ny+1),
             xv=KernelAbstractions.zeros(backend, type, nx+2, ny+1),
@@ -158,29 +164,44 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
     K    = deepcopy(V)  # Residuals in CG
     Q    = deepcopy(V)  # Jacobian of compute_R wrt. V, multiplied by some vector (used for autodiff)
     invM = deepcopy(V)  # preconditioner, cells correspoinding to Dirichlet BC are zero
+
     
-    initialise_η_ρ!(η, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly)
+    initialise_B_ρ!(B, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly; ninc=ninc)
+
+    γ = γ_factor * tplNorm(B, Inf)
+
 
     # residual norms for monitoring convergence
     δ = Inf # CG
     χ = Inf # Newton
     ω = Inf # Pressure
 
+    
     δ_ref = tplNorm(ρg, Inf) # is this correct ?
     ω_ref = ρg_avg * Lx / η_avg
 
     # visualisation
-    fig = Figure(size=(600,400))
-    axs = (Eta=Axis(fig[1,1][1,1], aspect=1), P=Axis(fig[1,2][1,1], aspect=1),
-           Vx=Axis(fig[2,1][1,1], aspect=1), Vy=Axis(fig[2,2][1,1], aspect=1))
-    plt = (Eta=heatmap!(axs.Eta, Array(η.c), colormap=ColorSchemes.viridis),
-           P=heatmap!(axs.P, Array(P.c), colormap=ColorSchemes.viridis),
-           Vx=heatmap!(axs.Vx, Array(V.xc), colormap=ColorSchemes.viridis),
-           Vy=heatmap!(axs.Vy, Array(V.yc), colormap=ColorSchemes.viridis))
-    Colorbar(fig[1, 1][1, 2], plt.Eta)
-    Colorbar(fig[1, 2][1, 2], plt.P),
-    Colorbar(fig[2, 1][1, 2], plt.Vx),
-    Colorbar(fig[2, 2][1, 2], plt.Vy)
+    itercounts = []
+    res_newton = []
+
+    fig = Figure(size=(800,900))
+    axs = (Bc=Axis(fig[1,1][1,1], aspect=1, title="viscosity prefactor"),
+           Pc=Axis(fig[1,2][1,1], aspect=1, title="pressure"),
+           Vx=Axis(fig[2,1][1,1], aspect=1, title="horizontal velocity"),
+           Vy=Axis(fig[2,2][1,1], aspect=1, title="vertical velocity"),
+           Sr=Axis(fig[3,1][1,1], aspect=1, title="strain rate"),
+           Er=Axis(fig[3,2][1,1], title="Convergence of Newton Method", xlabel="iterations / nx", ylabel="residual norm"))
+
+    plt = (Bc=heatmap!(axs.Bc, B.c, colormap=ColorSchemes.viridis),
+           Pc=heatmap!(axs.Pc, P.c, colormap=ColorSchemes.viridis),
+           Vx=heatmap!(axs.Vx, V.xc, colormap=ColorSchemes.viridis),
+           Vy=heatmap!(axs.Vy, V.yc, colormap=ColorSchemes.viridis),
+           Sr=heatmap!(axs.Sr, ϵ̇_E.c, colormap=ColorSchemes.viridis))
+    cbar= (B=Colorbar(fig[1, 1][1, 2], plt.Bc),
+           P=Colorbar(fig[1, 2][1, 2], plt.Pc),
+           Vx=Colorbar(fig[2, 1][1, 2], plt.Vx),
+           Vy=Colorbar(fig[2, 2][1, 2], plt.Vy),
+           Sr=Colorbar(fig[3, 1][1, 2], plt.Sr))
 
     display(fig)
 
@@ -189,8 +210,21 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
     up_D!      = update_D!(backend, workgroup, (nx+2, ny+2))
     up_V!      = update_V!(backend, workgroup, (nx+2, ny+2))
     comp_divV! = compute_divV!(backend, workgroup, (nx+1, ny+1))
+    comp_P_τ   = compute_P_τ!(backend, workgroup, (nx+1, ny+1))
+    comp_R     = compute_R!(backend, workgroup, (nx+2, ny+2))
+    comp_ϵ̇_E   = compute_strain_rate!(backend, workgroup, (nx+1, ny+1))
 
-    # create function 
+    # create function for jacobian-vector product
+    
+    function jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+        autodiff(Forward, comp_P_τ, DuplicatedNoNeed(P, P̄), DuplicatedNoNeed(τ, τ̄),
+                 Const(P₀), Duplicated(V, V̄), Const(B),
+                 Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
+
+        autodiff(Forward, comp_R, DuplicatedNoNeed(R, Q),
+                 Duplicated(P, P̄), Duplicated(τ, τ̄), Const(ρg), Const(iΔx), Const(iΔy))
+    
+    end
 
 
     # Powell Hestenes
@@ -199,21 +233,21 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
         verbose && println("Iteration ", it_P)
         tplSet!(P₀, P)
 
-        comp_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+        comp_P_τ(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+        comp_R(R, P, τ, ρg, iΔx, iΔy)
 
         χ = tplNorm(R, Inf) / δ_ref
 
         # Newton iteration
         while it < niter && χ > ϵ_newton
             # initialise preconditioner
-            init_invM!(invM, η, iΔx, iΔy, γ)
+            comp_ϵ̇_E(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
+            init_invM!(invM, ϵ̇_E, B, q, iΔx, iΔy, γ)
 
             # iteration zero
             # compute residual for CG, K = R - DR * dV
             tplSet!(V̄, dV)
-            autodiff(Forward, comp_R!, DuplicatedNoNeed(R, Q),
-                     Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
-                     Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
+            jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             tplSet!(K, R)
             tplAdd!(K, Q)
 
@@ -224,9 +258,7 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
             while it <= niter && δ > ϵ_cg
                 # compute α
                 tplSet!(V̄, D)
-                autodiff(Forward, comp_R!, DuplicatedNoNeed(K, Q),
-                     Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
-                     Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
+                jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
 
                 α = - μ / tplDot(D, Q)
 
@@ -234,9 +266,7 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
 
                 # recompute residual
                 tplSet!(V̄, dV)
-                autodiff(Forward, comp_R!, DuplicatedNoNeed(R, Q),
-                         Duplicated(P, P̄), Duplicated(η, η̄), Const(P₀), Duplicated(V, V̄),
-                         Const(ρg), Const(B), Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
+                jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                 tplSet!(K, R)
                 tplAdd!(K, Q)
 
@@ -252,33 +282,57 @@ function nonlinear_inclusion(;n=127, η_ratio=0.1, niter=10000, γ=1.,
 
                 if it % 10 == 0 println("CG residual = ", δ) end
             end
-            tplAdd!(V, dV)
+            # damped to newton iteration
+            tplSet!(V̄, V)
+            # tplScale!(dV, λ)
+            tplAdd!(V̄, dV)
 
-            # update plot
-            plt.Eta[3][] .= log10.(η.c)
-            plt.P[3][]   .= P.c
-            plt.Vx[3][]  .= V.xc
-            plt.Vy[3][]  .= V.yc
-            plt.Eta.colorrange[]= (min(-1,log10(minimum(η.c))), max(1,log10(maximum(η.c))))
-            plt.P.colorrange[]  = (min(-1e-10,minimum(P.c)), max(1e-10, maximum(P.c)))
-            plt.Vx.colorrange[] = (min(-1e-10,minimum(V.xc)), max(1e-10,maximum(V.xc)))
-            plt.Vy.colorrange[] = (min(-1e-10,minimum(V.yc)), max(1e-10,maximum(V.yc)))
+            comp_P_τ(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+            comp_R(R, P, τ, ρg, iΔx, iΔy)
 
-
-            display(fig)
-
-            comp_R!(R, P,  η, P₀, V, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ,)
-            χ = tplNorm(R, Inf) / δ_ref # correct scaling?
-            println("Newton residual = ", χ, "; total iteration count: ", it)
-        end    
-        comp_divV!(divV, V, iΔx, iΔy,)
-        ω = tplNorm(divV, Inf) / ω_ref # correct scaling?
-        println("Pressure residual = ", ω, ", Newton residual = ", χ, ", CG residual = ", δ)
-    end
-
-    return it, P, V, R, η
+             χ_new = tplNorm(R, Inf) / δ_ref
+             λ = 1.
+             while χ_new >= χ && λ > 1e-4
+                tplSet!(V̄, V)
+                tplScale!(dV, inv(MathConstants.golden))
+                tplAdd!(V̄, dV)
+                comp_P_τ(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+                comp_R(R, P, τ, ρg, iΔx, iΔy)
+                λ /= MathConstants.golden
+                χ_new = tplNorm(R, Inf) / δ_ref
+             end
+             tplSet!(V, V̄)
+             # λ *= MathConstants.golden
+             χ = χ_new
+ 
+             push!(itercounts, it)
+             push!(res_newton, χ)
+ 
+             # update plot -> works only for cpu backend
+             comp_ϵ̇_E(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
+             plt.Pc[3][]   .= P.c
+             plt.Vx[3][]  .= V.xc
+             plt.Vy[3][]  .= V.yc
+             plt.Sr[3][]  .= log10.(ϵ̇_E.c)
+             plt.Pc.colorrange[]  = (min(-1e-10,minimum(P.c)), max(1e-10, maximum(P.c)))
+             plt.Vx.colorrange[] = (min(-1e-10,minimum(V.xc)), max(1e-10,maximum(V.xc)))
+             plt.Vy.colorrange[] = (min(-1e-10,minimum(V.yc)), max(1e-10,maximum(V.yc)))
+             plt.Sr.colorrange[]= (min(-1,log10(minimum(ϵ̇_E.c))), max(1,log10(maximum(ϵ̇_E.c))))
+ 
+             scatterlines!(axs.Er, itercounts ./ nx, log10.(res_newton), color=:purple)
+ 
+             display(fig)
+             
+             println("Newton residual = ", χ, "; λ =", λ, "; total iteration count: ", it)
+         end    
+         comp_divV!(divV, V, iΔx, iΔy)
+         ω = tplNorm(divV, Inf) / ω_ref # correct scaling?
+         println("Pressure residual = ", ω, ", Newton residual = ", χ, ", CG residual = ", δ)
+     end
+ 
+     return it, P, V, R, η
 end
 
 
-outfields = nonlinear_inclusion(n=64, niter=5000, γ=10., ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=0.5);
+outfields = nonlinear_inclusion(n=64, ninc=4, η_ratio=10.,γ_factor=100., niter=60000, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3);
 

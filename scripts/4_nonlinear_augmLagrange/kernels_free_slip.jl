@@ -44,36 +44,104 @@ end
 end
 
 
+# dimensions for kernel launch: ny+2
+@kernel inbounds=true function set_neumann_x!(V)
+    j, = @index(Global, NTuple)
+    if j <= size(V.yc, 2)
+        V.yc[1  , j] = V.yc[2    , j]
+        V.yc[end, j] = V.yc[end-1, j]
+    end
+    if j <= size(V.xv, 2)
+        V.yv[1  , j] = V.yv[2    , j]
+        V.yv[end, j] = V.yv[end-1, j]
+    end
+end
+
+
+# dimensions for kernel launch: nx+2
+@kernel inbounds=true function set_neumann_y!(V)
+    i, = @index(Global, NTuple)
+    if i <= size(V.xc, 1)
+        V.xc[i, 1  ] = V.xc[i, 2    ]
+        V.xc[i, end] = V.xc[i, end-1]
+    end
+    if i <= size(V.xv, 1)
+        V.xv[i, 1  ] = V.xv[i, 2    ]
+        V.xv[i, end] = V.xv[i, end-1]
+    end
+end
+
+
 # dimensions for kernel launch: nx+1, ny+1
 @kernel inbounds=true function compute_P_τ!(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
     i, j = @index(Global, NTuple)
     if i <= size(P.c, 1) && j <= size(P.c, 2)
+
+        if i == 1
+            V.xc[i, j] = 0.
+        end
+
+        if i + 1 == size(V.xc, 1)
+            V.xc[i+1, j] = 0.
+        end
+
+        if j == 1
+            V.yc[i, j] = 0.
+        end
+
+        if j + 1 == size(V.yc, 2)
+            V.yc[i, j+1] = 0.
+        end
+
         dVxdx = (V.xc[i+1, j] - V.xc[i, j]) * iΔx 
         dVydy = (V.yc[i, j+1] - V.yc[i, j]) * iΔy
 
         P.c[i, j] = P₀.c[i, j] - γ * (dVxdx + dVydy)
 
-
-        dVxdy_dVydx = 0.5*((V.xv[i+1, j+1] - V.xv[i+1, j]) * iΔy + (V.yv[i+1, j+1] - V.yv[i, j+1]) * iΔx)
+        if 1 < i < size(P.c, 1) && 1 < j < size(P.c, 2)
+            dVxdy_dVydx = 0.5 * ((V.xv[i+1, j+1] - V.xv[i+1, j]) * iΔy + (V.yv[i+1, j+1] - V.yv[i, j+1]) * iΔx)
+        else
+            dVxdy_dVydx = 0.
+        end
         
         η = 0.5 * B.c[i, j] * (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2) ^ (0.5q - 1)
         τ.c.xx[i, j] = 2 * η * dVxdx
         τ.c.yy[i, j] = 2 * η * dVydy
-        τ.c.xy[i, j] = 2 * η * dVxdy_dVydx
+        τ.c.xy[i, j] = η * dVxdy_dVydx
     end
 
     if i <= size(P.v, 1) && j <= size(P.v, 2)
+        if i == 1
+            V.xv[i, j] = 0.
+        end
+
+        if i + 1 == size(V.xv, 1)
+            V.xv[i+1, j] = 0.
+        end
+
+        if j == 1
+            V.yv[i, j] = 0.
+        end
+
+        if j + 1 == size(V.yv, 2)
+            V.yv[i, j+1] = 0.
+        end
+        
         dVxdx = (V.xv[i+1, j] - V.xv[i, j]) * iΔx
         dVydy = (V.yv[i, j+1] - V.yv[i, j]) * iΔy
 
         P.v[i, j] = P₀.v[i, j] - γ * (dVxdx + dVydy)
 
-        dVxdy = 1 < j < size(P.v, 2) ? 0.5 * (V.xc[i, j] - V.xc[i, j-1]) * iΔy : 0.  # gradient of wall parallel velocity is zero
-        dVydx = 1 < i < size(P.v, 1) ? 0.5 * (V.yc[i, j] - V.yc[i-1, j]) * iΔx : 0.  # gradient of wall parallel velocity is zero
-        η = 0.5 * B.v[i, j] * (0.5 * dVxdx^2 + 0.5 * dVydy^2 + (dVxdy + dVydx)^2 + 2 * ϵ̇_bg^2) ^ (0.5q - 1)
+        if 1 < i < size(P.v, 1) && 1 < j < size(P.v, 2)
+            dVxdy_dVydx = 0.5 * ((V.xc[i, j] - V.xc[i, j-1]) * iΔy + (V.yc[i, j] - V.yc[i-1, j]) * iΔx)
+        else
+            dVxdy_dVydx = 0.
+        end
+
+        η = 0.5 * B.v[i, j] * (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2) ^ (0.5q - 1)
         τ.v.xx[i, j] = 2 * η * dVxdx
         τ.v.yy[i, j] = 2 * η * dVydy
-        τ.v.xy[i, j] = η * (dVxdy + dVydx)
+        τ.v.xy[i, j] = η * dVxdy_dVydx
     end
 end
 
@@ -176,37 +244,41 @@ end
 
 
 # dimensions for kernel launch: nx+2, ny+2
-@kernel inbounds=true function initialise_invM(invM, η, iΔx, iΔy, γ)
+@kernel inbounds=true function initialise_invM(invM, ϵ̇_E, B, q, iΔx, iΔy, γ)
     i, j = @index(Global, NTuple)
+
+    ηc(i, j) = 0.5*B.c[i  , j] * ϵ̇_E.c[i  , j] ^ (0.5q - 1)
+    ηv(i, j) = 0.5*B.v[i, j  ] * ϵ̇_E.v[i, j  ] ^ (0.5q - 1)
     ## inner points
     # x direction, cell centers
     if 1 < i < size(invM.xc, 1) && 1 < j < size(invM.xc, 2)
-        mij = ( 2iΔx^2 * (η.c[i-1, j] + η.c[i, j  ])
-               + iΔy^2 * (η.v[i  , j] + η.v[i, j+1])
+        mij = ( 2iΔx^2 * (ηc(i-1, j) + ηc(i, j))
+               + iΔy^2 * (ηv(i, j) + ηv(i, j+1))
                + 2γ * iΔx^2)
         invM.xc[i, j] = inv(mij)
     end
 
     # y direction, cell centers
     if 1 < i < size(invM.yc, 1) && 1 < j < size(invM.yc, 2)
-        mij = ( 2iΔy^2 * (η.c[i, j-1] + η.c[i  , j])
-               + iΔx^2 * (η.v[i, j  ] + η.v[i+1, j])
+
+        mij = ( 2iΔy^2 * (ηc(i, j-1) + ηc(i, j))
+               + iΔx^2 * (ηv(i, j) + ηv(i+1, j))
                + 2γ * iΔy^2)
         invM.yc[i, j] = inv(mij)
     end
 
     # x direction, vertices
     if 1 < i < size(invM.xv, 1) && 1 < j < size(invM.xv, 2)
-        mij = ( 2iΔx^2 * (η.v[i-1, j  ] + η.v[i  , j])
-               + iΔy^2 * (η.c[i-1, j-1] + η.c[i-1, j])
+        mij = ( 2iΔx^2 * (ηv(i-1, j) + ηv(i, j))
+               + iΔy^2 * (ηc(i-1, j-1) + ηc(i-1, j))
                + 2γ * iΔx^2)
         invM.xv[i, j] = inv(mij)
     end
 
     # y direction, vertices
     if 1 < i < size(invM.yv, 1) && 1 < j < size(invM.yv, 2)
-        mij = ( 2iΔy^2 * (η.v[i  , j-1] + η.v[i, j  ])
-                + iΔx^2 * (η.c[i-1, j-1] + η.c[i, j-1])
+        mij = ( 2iΔy^2 * (ηv(i, j-1) + ηv(i, j))
+                + iΔx^2 * (ηc(i-1, j-1) + ηc(i, j-1))
                 + 2γ *iΔy^2)
         invM.yv[i, j] = inv(mij)
     end
@@ -215,54 +287,87 @@ end
     # x direction, cell centers
     if 1 < i < size(invM.xc, 1)
         if j == 1
-            invM.xc[i, j] = inv(2iΔx^2 * (η.c[i-1, j] + η.c[i, j])
-                               + iΔy^2 * (η.v[i, j+1])
+            invM.xc[i, j] = inv(2iΔx^2 * (ηc(i-1, j) + ηc(i, j))
+                               + iΔy^2 * (ηv(i, j+1))
                                + 2γ * iΔx^2)
         elseif j == size(invM.xc, 2)
-            invM.xc[i, j] = inv(2iΔx^2 * (η.c[i-1, j] + η.c[i, j])
-                               + iΔy^2 * (η.v[i  , j])
+            invM.xc[i, j] = inv(2iΔx^2 * (ηc(i-1, j) + ηc(i, j))
+                               + iΔy^2 * (ηv(i  , j))
                                + 2γ * iΔx^2)
         end
     end
     # y direction, cell centers
     if 1 < j < size(invM.yc, 2)
         if i == 1
-            invM.yc[i, j] = inv(2iΔy^2 * (η.c[i, j-1] + η.c[i, j])
-                               + iΔx^2 * (η.v[i+1, j])
+            invM.yc[i, j] = inv(2iΔy^2 * (ηc(i, j-1) + ηc(i, j))
+                               + iΔx^2 * (ηv(i+1, j))
                                + 2γ * iΔy^2)
         end
         if i == size(invM.yc, 1)
-            invM.yc[i, j] = inv(2iΔy^2 * (η.c[i, j-1] + η.c[i, j])
-                               + iΔx^2 * (η.v[i, j  ])
+            invM.yc[i, j] = inv(2iΔy^2 * (ηc(i, j-1) + ηc(i, j))
+                               + iΔx^2 * (ηv(i, j  ))
                                + 2γ * iΔy^2)
         end
     end
     # x direction, vertices
     if 1 < i < size(invM.xv, 1)
         if j == 1
-            invM.xv[i, j] = inv(2iΔx^2 * (η.v[i-1, j] + η.v[i, j])
-                               + iΔy^2 * (η.c[i-1, j])
+            invM.xv[i, j] = inv(2iΔx^2 * (ηv(i-1, j) + ηv(i, j))
+                               + iΔy^2 * (ηc(i-1, j))
                                + 2γ * iΔx^2)
         end
         if j == size(invM.xv, 2)
-            invM.xv[i, j] = inv(2iΔx^2 * (η.v[i-1, j] + η.v[i, j])
-                               + iΔy^2 * (η.c[i-1, j-1])
+            invM.xv[i, j] = inv(2iΔx^2 * (ηv(i-1, j) + ηv(i, j))
+                               + iΔy^2 * (ηc(i-1, j-1))
                                + 2γ * iΔx^2)
         end
     end
     # y direction, vertices
     if 1 < j < size(invM.yv, 2)
         if i == 1
-            invM.yv[i, j] = inv(2iΔy^2 * (η.v[i, j-1] + η.v[i, j])
-                               + iΔx^2 * (η.c[i, j-1])
+            invM.yv[i, j] = inv(2iΔy^2 * (ηv(i, j-1) + ηv(i, j))
+                               + iΔx^2 * (ηc(i, j-1))
                                + 2γ * iΔy^2)
         end
         if i == size(invM.yv, 1)
-            invM.yv[i, j] = inv(2iΔy^2 * (η.v[i  , j-1] + η.v[i, j])
-                               + iΔx^2 * (η.c[i-1, j-1])
+            invM.yv[i, j] = inv(2iΔy^2 * (ηv(i  , j-1) + ηv(i, j))
+                               + iΔx^2 * (ηc(i-1, j-1))
                                + 2γ * iΔy^2)
         end
     end
 
-    ## Dirichlet boundary points, leave zero    
+    ## Dirichlet boundary points, leave zero   )
+end
+
+
+# dimensions for kernel launch: nx+1, ny+1
+@kernel inbounds=true function compute_strain_rate!(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
+    i, j = @index(Global, NTuple)
+
+    if i <= size(ϵ̇_E.c, 1) && j <= size(ϵ̇_E.c, 2)
+        dVxdx = (V.xc[i+1, j] - V.xc[i, j]) * iΔx 
+        dVydy = (V.yc[i, j+1] - V.yc[i, j]) * iΔy
+
+
+        if 1 < i < size(ϵ̇_E.c, 1) && 1 < j < size(ϵ̇_E.c, 2)
+            dVxdy_dVydx = 0.5 * ((V.xv[i+1, j+1] - V.xv[i+1, j]) * iΔy + (V.yv[i+1, j+1] - V.yv[i, j+1]) * iΔx)
+        else
+            dVxdy_dVydx = 0.
+        end
+        
+        ϵ̇_E.c[i, j] = (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2)
+    end
+
+    if i <= size(ϵ̇_E.v, 1) && j <= size(ϵ̇_E.v, 2)
+        dVxdx = (V.xv[i+1, j] - V.xv[i, j]) * iΔx
+        dVydy = (V.yv[i, j+1] - V.yv[i, j]) * iΔy
+
+        if 1 < i < size(ϵ̇_E.v, 1) && 1 < j < size(ϵ̇_E.v, 2)
+            dVxdy_dVydx = 0.5 * ((V.xc[i, j] - V.xc[i, j-1]) * iΔy + (V.yc[i, j] - V.yc[i-1, j]) * iΔx)
+        else
+            dVxdy_dVydx = 0.
+        end
+
+        ϵ̇_E.v[i, j] = (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2)
+    end
 end
