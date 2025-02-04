@@ -247,7 +247,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             # iteration zero
             # compute residual for CG, K = R - DR * dV
             tplSet!(V̄, dV)
-            jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+            jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             tplSet!(K, R)
             tplAdd!(K, Q)
 
@@ -266,7 +266,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
                 # recompute residual
                 tplSet!(V̄, dV)
-                jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+                jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                 tplSet!(K, R)
                 tplAdd!(K, Q)
 
@@ -280,7 +280,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 δ = tplNorm(K, Inf) / δ_ref # correct scaling?
                 it += 1
 
-                if it % 10 == 0 println("CG residual = ", δ) end
+                if verbose && it % 100 == 0 println("CG residual = ", δ) end
             end
             # damped to newton iteration
             tplSet!(V̄, V)
@@ -323,16 +323,16 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
  
              display(fig)
              
-             println("Newton residual = ", χ, "; λ =", λ, "; total iteration count: ", it)
+             println("Newton residual = ", χ, "; λ = ", λ, "; total iteration count: ", it)
          end    
          comp_divV!(divV, V, iΔx, iΔy)
          ω = tplNorm(divV, Inf) / ω_ref # correct scaling?
          println("Pressure residual = ", ω, ", Newton residual = ", χ, ", CG residual = ", δ)
      end
  
-     return it, P, V, R, η
+     return it, P, V, R
 end
 
 
-outfields = nonlinear_inclusion(n=64, ninc=4, η_ratio=10.,γ_factor=100., niter=60000, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3);
+outfields = nonlinear_inclusion(n=64, ninc=4, η_ratio=5.,γ_factor=100., niter=6000, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3);
 

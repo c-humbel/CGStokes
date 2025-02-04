@@ -77,6 +77,7 @@ end
     i, j = @index(Global, NTuple)
     if i <= size(P.c, 1) && j <= size(P.c, 2)
 
+        # Dirichlet BC
         if i == 1
             V.xc[i, j] = 0.
         end
@@ -93,21 +94,24 @@ end
             V.yc[i, j+1] = 0.
         end
 
+        # Pressure update
         dVxdx = (V.xc[i+1, j] - V.xc[i, j]) * iΔx 
         dVydy = (V.yc[i, j+1] - V.yc[i, j]) * iΔy
 
         P.c[i, j] = P₀.c[i, j] - γ * (dVxdx + dVydy)
 
+        # Neumann BC
         if 1 < i < size(P.c, 1) && 1 < j < size(P.c, 2)
             dVxdy_dVydx = 0.5 * ((V.xv[i+1, j+1] - V.xv[i+1, j]) * iΔy + (V.yv[i+1, j+1] - V.yv[i, j+1]) * iΔx)
         else
             dVxdy_dVydx = 0.
         end
         
+        # Stresses update
         η = 0.5 * B.c[i, j] * (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2) ^ (0.5q - 1)
         τ.c.xx[i, j] = 2 * η * dVxdx
         τ.c.yy[i, j] = 2 * η * dVydy
-        τ.c.xy[i, j] = η * dVxdy_dVydx
+        τ.c.xy[i, j] = 2 * η * dVxdy_dVydx
     end
 
     if i <= size(P.v, 1) && j <= size(P.v, 2)
@@ -141,7 +145,7 @@ end
         η = 0.5 * B.v[i, j] * (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2) ^ (0.5q - 1)
         τ.v.xx[i, j] = 2 * η * dVxdx
         τ.v.yy[i, j] = 2 * η * dVydy
-        τ.v.xy[i, j] = η * dVxdy_dVydx
+        τ.v.xy[i, j] = 2 * η * dVxdy_dVydx
     end
 end
 
@@ -247,8 +251,8 @@ end
 @kernel inbounds=true function initialise_invM(invM, ϵ̇_E, B, q, iΔx, iΔy, γ)
     i, j = @index(Global, NTuple)
 
-    ηc(i, j) = 0.5*B.c[i  , j] * ϵ̇_E.c[i  , j] ^ (0.5q - 1)
-    ηv(i, j) = 0.5*B.v[i, j  ] * ϵ̇_E.v[i, j  ] ^ (0.5q - 1)
+    ηc(i, j) = 0.5*B.c[i, j] * ϵ̇_E.c[i, j] ^ (0.5q - 1)
+    ηv(i, j) = 0.5*B.v[i, j] * ϵ̇_E.v[i, j] ^ (0.5q - 1)
     ## inner points
     # x direction, cell centers
     if 1 < i < size(invM.xc, 1) && 1 < j < size(invM.xc, 2)

@@ -125,3 +125,14 @@ function construct_jacobian(n=5; seed=1)
 
     return J
 end
+
+
+# check that Jacobian is (almost) symmetric
+Jin = construct_jacobian();
+
+@assert all(Jin .≈ Jin')
+
+@show maximum(abs.(Jin .- Jin'));
+
+# check that eigenvalues are real and positive
+@assert eigmin(-Jin) > 0
