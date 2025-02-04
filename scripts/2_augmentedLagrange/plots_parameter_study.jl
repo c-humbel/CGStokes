@@ -128,8 +128,9 @@ function create_plot_gamma_values(etas, gammas, iters, nx=128, logscale=true)
 end
 
 
-function colapse_lines(etas, gammas, iters, b=1, nx=128, logscale=true)
+function colapse_lines(etas, gammas, iters; b=1, nx=128, logscale=true)
     iters = iters ./ nx
+    n_etas = length(etas)
 
     islg = ""
     if logscale
@@ -139,11 +140,17 @@ function colapse_lines(etas, gammas, iters, b=1, nx=128, logscale=true)
         islg = " (log)"
     end
 
-    fig = Figure(size=(700, 400))
-    ax = Axis(fig[1,1], xlabel="gamma" * islg, ylabel="η^$b iters / nx" * islg)
+    colours = resample(ColorSchemes.viridis, 2n_etas + 1)[2:2:2n_etas]
+    markers = [:circle, :diamond, :utriangle, :dtriangle, :ltriangle, :rtriangle, :cross, :rect, :star4, :pentagon, :star5, :hexagon, :star6] 
+    markersize=15
+
+    fig = Figure(size=(700, 600))
+    lin = Axis(fig[1,1], xlabel="gamma" * islg, ylabel="iterations / nx ⋅ viscosity ^ $b"  * islg, title="Required Iterations for Several Inclusions")
     for (i, eta) = enumerate(etas)
-        scatterlines!(ax, gammas[:, i], iters[:, i] .+ (b * eta))
+        iters_collapsed = iters[:, i] .+  (b*eta)
+        scatterlines!(lin, gammas[:, i], iters_collapsed, color=colours[i], marker=markers[i], markersize=markersize, label=string(eta))
     end
+    Legend(fig[1,2], lin, "viscosity ratio" * islg, orientation=:vertical, framevisible=false, padding=(0, 0, 0, 0))
 
     return fig
 end
