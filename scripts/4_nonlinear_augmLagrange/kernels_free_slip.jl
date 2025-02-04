@@ -107,7 +107,7 @@ end
             dVxdy_dVydx = 0.
         end
         
-        # Stresses update
+        # Stress update
         η = 0.5 * B.c[i, j] * (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2) ^ (0.5q - 1)
         τ.c.xx[i, j] = 2 * η * dVxdx
         τ.c.yy[i, j] = 2 * η * dVydy
@@ -162,9 +162,9 @@ end
         # inner values in x direction
 
         # residual in x direction on the interface
-        R.xc[i, j] = ( (τ.c.xx[i, j  ] - τ.c.xx[i-1, j]) * iΔx
-                     + (τ.v.xy[i, j+1] - τ.v.xy[i  , j]) * iΔy
-                     - (P.c[i, j] - P.c[i-1, j]) * iΔx)
+        R.xc[i, j] = (-(τ.c.xx[i, j  ] - τ.c.xx[i-1, j]) * iΔx
+                     - (τ.v.xy[i, j+1] - τ.v.xy[i  , j]) * iΔy
+                     + (P.c[i, j] - P.c[i-1, j]) * iΔx)
     end
     ## for velocities associated with cell corners (V.xv)
     if 1 < i < size(R.xv, 1) && j <= size(R.xv, 2)
@@ -174,9 +174,9 @@ end
         τxy_b = j > 1 ? τ.c.xy[i-1, j-1] : 0. # zero stress at the bottom boundary
         τxy_t = j < size(R.xv, 2) ? τ.c.xy[i-1, j] : 0.  # zero stress at the top boundary
 
-        R.xv[i, j] = ( (τ.v.xx[i, j] - τ.v.xx[i-1, j]) * iΔx
-                     + (τxy_t - τxy_b) * iΔy
-                     - (P.v[i, j] - P.v[i-1, j]) * iΔx)
+        R.xv[i, j] = (-(τ.v.xx[i, j] - τ.v.xx[i-1, j]) * iΔx
+                     - (τxy_t - τxy_b) * iΔy
+                     + (P.v[i, j] - P.v[i-1, j]) * iΔx)
     end
 
     ### residual in vertical (y) direction
@@ -185,19 +185,19 @@ end
     if i <= size(R.yc, 1) && 1 < j < size(R.yc, 2)
         # inner values in y direction
         # all values in x direction        
-        R.yc[i, j] = ( (τ.c.yy[i  , j] - τ.c.yy[i, j-1]) * iΔy
-                     + (τ.v.xy[i+1, j] - τ.v.xy[i, j  ]) * iΔx
-                     - ( P.c[i, j] -  P.c[i, j-1]) * iΔy
-                     - (ρg.c[i, j] + ρg.c[i, j-1]) * 0.5)
+        R.yc[i, j] = (-(τ.c.yy[i  , j] - τ.c.yy[i, j-1]) * iΔy
+                     - (τ.v.xy[i+1, j] - τ.v.xy[i, j  ]) * iΔx
+                     + ( P.c[i, j] -  P.c[i, j-1]) * iΔy
+                     + (ρg.c[i, j] + ρg.c[i, j-1]) * 0.5)
     end
     ## for velocities associated with cell corners (V.yv)
     if i <= size(R.yv, 1) && 1 < j < size(R.yv, 2)
         τxy_l = i > 1 ? τ.c.xy[i-1, j-1] : 0.
         τxy_r = i < size(R.yv, 1) ? τ.c.xy[i, j-1] : 0.
 
-        R.yv[i, j] = ( (τ.v.yy[i, j] - τ.v.yy[i, j-1]) * iΔy
-                     + (τxy_r - τxy_l) * iΔx
-                     - ( P.v[i, j] -  P.v[i, j-1]) * iΔy
+        R.yv[i, j] = (-(τ.v.yy[i, j] - τ.v.yy[i, j-1]) * iΔy
+                     - (τxy_r - τxy_l) * iΔx
+                     + ( P.v[i, j] -  P.v[i, j-1]) * iΔy
                      + (ρg.v[i, j] + ρg.v[i, j-1]) * 0.5)
     end
 
@@ -264,7 +264,6 @@ end
 
     # y direction, cell centers
     if 1 < i < size(invM.yc, 1) && 1 < j < size(invM.yc, 2)
-
         mij = ( 2iΔy^2 * (ηc(i, j-1) + ηc(i, j))
                + iΔx^2 * (ηv(i, j) + ηv(i+1, j))
                + 2γ * iΔy^2)
@@ -282,8 +281,8 @@ end
     # y direction, vertices
     if 1 < i < size(invM.yv, 1) && 1 < j < size(invM.yv, 2)
         mij = ( 2iΔy^2 * (ηv(i, j-1) + ηv(i, j))
-                + iΔx^2 * (ηc(i-1, j-1) + ηc(i, j-1))
-                + 2γ *iΔy^2)
+               + iΔx^2 * (ηc(i-1, j-1) + ηc(i, j-1))
+               + 2γ * iΔy^2)
         invM.yv[i, j] = inv(mij)
     end
 

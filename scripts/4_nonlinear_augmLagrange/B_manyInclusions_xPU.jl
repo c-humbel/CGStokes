@@ -216,6 +216,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
     # create function for jacobian-vector product
     
+    # compute D_v r * V̄ as D_p r * D_v p * V̄ + D_τ r * D_v τ * V̄
     function jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
         autodiff(Forward, comp_P_τ, DuplicatedNoNeed(P, P̄), DuplicatedNoNeed(τ, τ̄),
                  Const(P₀), Duplicated(V, V̄), Const(B),
@@ -231,8 +232,10 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     it = 0
     while it < niter && ω > ϵ_ph
         verbose && println("Iteration ", it_P)
+        # p_0 = p
         tplSet!(P₀, P)
 
+        # r = f - div τ + grad p
         comp_P_τ(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
         comp_R(R, P, τ, ρg, iΔx, iΔy)
 
@@ -241,39 +244,45 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
         # Newton iteration
         while it < niter && χ > ϵ_newton
             # initialise preconditioner
+            # ϵ̇_E = 0.5 * ϵ̇_ij * ϵ̇_ij
             comp_ϵ̇_E(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
             init_invM!(invM, ϵ̇_E, B, q, iΔx, iΔy, γ)
 
             # iteration zero
-            # compute residual for CG, K = R - DR * dV
+            # compute residual for CG,
+            # k = r - D_v r * dv
             tplSet!(V̄, dV)
             jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             tplSet!(K, R)
-            tplAdd!(K, Q)
+            tplSub!(K, Q)
 
+            # D = inv(M) * k
             tplSet!(D, K, invM)
             μ = tplDot(K, D)
             δ = tplNorm(K, Inf) / δ_ref
             # start iteration
             while it <= niter && δ > ϵ_cg
                 # compute α
+                # α = k^T * inv(M) * k / (d^T * D_v r * d)
                 tplSet!(V̄, D)
                 jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+                α = μ / tplDot(D, Q)
 
-                α = - μ / tplDot(D, Q)
-
+                # dv += α d
                 up_V!(dV, D, α)
 
                 # recompute residual
+                # k = r - D_v r * dv
                 tplSet!(V̄, dV)
                 jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                 tplSet!(K, R)
-                tplAdd!(K, Q)
+                tplSub!(K, Q)
 
-
+                # μ = k^T inv(M) k
                 μ_new = tplDot(K, K, invM)
                 β = μ_new / μ
                 μ = μ_new
+                # d = β d + inv(M) * k 
                 up_D!(D, K, invM, β)
 
                 # compute residual norm
@@ -283,6 +292,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 if verbose && it % 100 == 0 println("CG residual = ", δ) end
             end
             # damped to newton iteration
+            # find λ st. r(v + λ dv) < r(v)
             tplSet!(V̄, V)
             # tplScale!(dV, λ)
             tplAdd!(V̄, dV)
@@ -310,14 +320,14 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
  
              # update plot -> works only for cpu backend
              comp_ϵ̇_E(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
-             plt.Pc[3][]   .= P.c
-             plt.Vx[3][]  .= V.xc
-             plt.Vy[3][]  .= V.yc
-             plt.Sr[3][]  .= log10.(ϵ̇_E.c)
-             plt.Pc.colorrange[]  = (min(-1e-10,minimum(P.c)), max(1e-10, maximum(P.c)))
+             plt.Pc[3][] .= P.c
+             plt.Vx[3][] .= V.xc
+             plt.Vy[3][] .= V.yc
+             plt.Sr[3][] .= log10.(ϵ̇_E.c)
+             plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
              plt.Vx.colorrange[] = (min(-1e-10,minimum(V.xc)), max(1e-10,maximum(V.xc)))
              plt.Vy.colorrange[] = (min(-1e-10,minimum(V.yc)), max(1e-10,maximum(V.yc)))
-             plt.Sr.colorrange[]= (min(-1,log10(minimum(ϵ̇_E.c))), max(1,log10(maximum(ϵ̇_E.c))))
+             plt.Sr.colorrange[] = (min(-1,log10(minimum(ϵ̇_E.c))), max(1,log10(maximum(ϵ̇_E.c))))
  
              scatterlines!(axs.Er, itercounts ./ nx, log10.(res_newton), color=:purple)
  

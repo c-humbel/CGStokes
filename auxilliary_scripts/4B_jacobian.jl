@@ -196,14 +196,14 @@ Jin = construct_jacobian();
 @show maximum(abs.(Jin .- Jin'));
 
 # check that eigenvalues are real and positive
-@assert eigmin(-Jin) > 0
+@assert eigmin(Jin) > 0
 
 # compare Jacobian and preconditioner
 J = construct_jacobian_with_boundary();
 m = construct_preconditioner_matrix();
 
 m_ex = zeros(size(m));
-diagJ = diag(-J);
+diagJ = diag(J);
 m_ex[diagJ .!= 0] = inv.(diagJ[diagJ .!= 0]);
 
 m_ex .- m
