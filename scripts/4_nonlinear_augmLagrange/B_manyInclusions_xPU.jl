@@ -122,7 +122,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
     # physical parameters would be: n == 3, A = (24 * 1e-25) in Glen's law, see Cuffrey and Paterson (2006), table 3.3
     # and q = 1. + 1/n, η_avg = (24 * 1e-25) ^ (-1/n), see Schoof (2006)
-    η_avg = 1. 
+    B_avg = 1. 
     q = 1. + 1/3  
 
     Lx = Ly = L_ref
@@ -166,7 +166,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     invM = deepcopy(V)  # preconditioner, cells correspoinding to Dirichlet BC are zero
 
     
-    initialise_B_ρ!(B, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly; ninc=ninc)
+    initialise_B_ρ!(B, ρg, B_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly; ninc=ninc)
 
     γ = γ_factor * tplNorm(B, Inf)
 
@@ -177,8 +177,8 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     ω = Inf # Pressure
 
     
-    δ_ref = tplNorm(ρg, Inf) # is this correct ?
-    ω_ref = ρg_avg * Lx / η_avg
+    χ_ref = tplNorm(ρg, Inf) # is this correct ?
+    ω_ref = tplNorm(ρg, Inf) * Lx / tplNorm(B, Inf)
 
     # visualisation
     itercounts = []
@@ -240,10 +240,12 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
         comp_P_τ(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
         comp_R(R, P, τ, ρg, iΔx, iΔy)
 
-        χ = tplNorm(R, Inf) / δ_ref
+        χ = tplNorm(R, Inf) / χ_ref
 
         # Newton iteration
         while it < niter && χ > ϵ_newton
+            # reference 
+            δ_ref = tplNorm(ρg, Inf)
             # initialise preconditioner
             # ϵ̇_E = 0.5 * ϵ̇_ij * ϵ̇_ij
             comp_ϵ̇_E(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
@@ -253,7 +255,6 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             # iteration zero
             # compute residual for CG,
             # k = r - Dv r * dv
-            # now: k = r + D r * dv
             tplSet!(V̄, dV)
             # use K instead of R as first argument because it might get overwritten in autodiff,
             # but it doesn't matter for K since we assign a new value anyway
@@ -274,10 +275,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 α = μ / tplDot(D, Q)
 
                 # dv += α d
-                # up_V!(dV, D, α)
-                for I = eachindex(dV)
-                    @. dV[I] += α * D[I]
-                end
+                up_V!(dV, D, α)
 
                 # recompute residual
                 # k = r - Dv r * dv
@@ -291,10 +289,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 β = μ_new / μ
                 μ = μ_new
                 # d = β d + inv(M) * k 
-                # up_D!(D, K, invM, β)
-                for I = eachindex(D)
-                    @. D[I] = β * D[I] + invM[I] * K[I]
-                end
+                up_D!(D, K, invM, β)
 
                 # compute residual norm
                 δ = tplNorm(K, Inf) / δ_ref # correct scaling?
@@ -313,7 +308,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             comp_P_τ(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             comp_R(R, P, τ, ρg, iΔx, iΔy)
 
-            χ_new = tplNorm(R, Inf) / δ_ref
+            χ_new = tplNorm(R, Inf) / χ_ref
             λ = 1.
             while χ_new >= χ && λ > 1e-4
                 tplSet!(V̄, V)
@@ -322,7 +317,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 comp_P_τ(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                 comp_R(R, P, τ, ρg, iΔx, iΔy)
                 λ /= MathConstants.golden
-                χ_new = tplNorm(R, Inf) / δ_ref
+                χ_new = tplNorm(R, Inf) / χ_ref
             end
             tplSet!(V, V̄)
             # λ *= MathConstants.golden
@@ -357,5 +352,5 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 end
 
 
-outfields = nonlinear_inclusion(n=128, ninc=4, η_ratio=10.,γ_factor=100., niter=100000, ϵ_ph=1e-5, ϵ_cg=1e-5, ϵ_newton=1e-5, verbose=true);
+outfields = nonlinear_inclusion(n=128, ninc=3, η_ratio=5.,γ_factor=100., niter=100000, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4, verbose=true);
 

@@ -162,7 +162,7 @@ end
         D.yc[i, j] = invM.yc[i, j] * R.yc[i, j] + β * D.yc[i, j]
     end
 
-    if 1 < i < size(D.xv, 1) && j < size(D.xv, 2)
+    if 1 < i < size(D.xv, 1) && j <= size(D.xv, 2)
         D.xv[i, j] = invM.xv[i, j] * R.xv[i, j] + β * D.xv[i, j]
     end
 
@@ -187,7 +187,7 @@ end
         V.xv[i, j] += α * D.xv[i, j]
     end
 
-    if i <= size(V.yv, 1) && 1 < j <size(V.yv, 2)
+    if i <= size(V.yv, 1) && 1 < j < size(V.yv, 2)
         V.yv[i, j] += α * D.yv[i, j]
     end
 end
@@ -285,7 +285,7 @@ end
         end
     end
 
-    ## Dirichlet boundary points, leave zero   )
+    ## Dirichlet boundary points, leave zero
 end
 
 
