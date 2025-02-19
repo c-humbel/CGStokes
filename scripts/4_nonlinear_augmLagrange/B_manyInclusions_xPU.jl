@@ -216,7 +216,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
     # create function for jacobian-vector product
     
-    # compute D_v r * V̄ as D_p r * D_v p * V̄ + D_τ r * D_v τ * V̄
+    # compute Dv r * V̄ as Dp r * Dv p * V̄ + Dτ r * Dv τ * V̄
     function jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
         autodiff(Forward, comp_P_τ, DuplicatedNoNeed(P, P̄), DuplicatedNoNeed(τ, τ̄),
                  Const(P₀), Duplicated(V, V̄), Const(B),
@@ -231,11 +231,12 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     # Powell Hestenes
     it = 0
     while it < niter && ω > ϵ_ph
-        verbose && println("Iteration ", it_P)
+        verbose && println("Iteration ", length(itercounts))
         # p_0 = p
         tplSet!(P₀, P)
 
-        # r = f - div τ + grad p
+        # r = f - div τ + grad p - grad( div v)
+        # now: r = ρg + div τ - grad(p_0 - div v)
         comp_P_τ(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
         comp_R(R, P, τ, ρg, iΔx, iΔy)
 
@@ -246,33 +247,40 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             # initialise preconditioner
             # ϵ̇_E = 0.5 * ϵ̇_ij * ϵ̇_ij
             comp_ϵ̇_E(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
+            # M = diag (Dv r)
             init_invM!(invM, ϵ̇_E, B, q, iΔx, iΔy, γ)
 
             # iteration zero
             # compute residual for CG,
-            # k = r - D_v r * dv
+            # k = r - Dv r * dv
+            # now: k = r + D r * dv
             tplSet!(V̄, dV)
+            # use K instead of R as first argument because it might get overwritten in autodiff,
+            # but it doesn't matter for K since we assign a new value anyway
             jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             tplSet!(K, R)
             tplSub!(K, Q)
 
-            # D = inv(M) * k
+            # d = inv(M) * k
             tplSet!(D, K, invM)
             μ = tplDot(K, D)
             δ = tplNorm(K, Inf) / δ_ref
             # start iteration
             while it <= niter && δ > ϵ_cg
                 # compute α
-                # α = k^T * inv(M) * k / (d^T * D_v r * d)
+                # α = k^T * inv(M) * k / (d^T * Dv r * d)
                 tplSet!(V̄, D)
                 jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                 α = μ / tplDot(D, Q)
 
                 # dv += α d
-                up_V!(dV, D, α)
+                # up_V!(dV, D, α)
+                for I = eachindex(dV)
+                    @. dV[I] += α * D[I]
+                end
 
                 # recompute residual
-                # k = r - D_v r * dv
+                # k = r - Dv r * dv
                 tplSet!(V̄, dV)
                 jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                 tplSet!(K, R)
@@ -283,57 +291,62 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 β = μ_new / μ
                 μ = μ_new
                 # d = β d + inv(M) * k 
-                up_D!(D, K, invM, β)
+                # up_D!(D, K, invM, β)
+                for I = eachindex(D)
+                    @. D[I] = β * D[I] + invM[I] * K[I]
+                end
 
                 # compute residual norm
                 δ = tplNorm(K, Inf) / δ_ref # correct scaling?
                 it += 1
 
-                if verbose && it % 100 == 0 println("CG residual = ", δ) end
+                if verbose && it % 100 == 0
+                    println("CG residual = ", δ)
+
+                end
             end
             # damped to newton iteration
             # find λ st. r(v + λ dv) < r(v)
             tplSet!(V̄, V)
-            # tplScale!(dV, λ)
-            tplAdd!(V̄, dV)
+            tplSub!(V̄, dV)
 
             comp_P_τ(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             comp_R(R, P, τ, ρg, iΔx, iΔy)
 
-             χ_new = tplNorm(R, Inf) / δ_ref
-             λ = 1.
-             while χ_new >= χ && λ > 1e-4
+            χ_new = tplNorm(R, Inf) / δ_ref
+            λ = 1.
+            while χ_new >= χ && λ > 1e-4
                 tplSet!(V̄, V)
                 tplScale!(dV, inv(MathConstants.golden))
-                tplAdd!(V̄, dV)
+                tplSub!(V̄, dV)
                 comp_P_τ(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                 comp_R(R, P, τ, ρg, iΔx, iΔy)
                 λ /= MathConstants.golden
                 χ_new = tplNorm(R, Inf) / δ_ref
-             end
-             tplSet!(V, V̄)
-             # λ *= MathConstants.golden
-             χ = χ_new
+            end
+            tplSet!(V, V̄)
+            # λ *= MathConstants.golden
+            χ = χ_new
  
-             push!(itercounts, it)
-             push!(res_newton, χ)
- 
-             # update plot -> works only for cpu backend
-             comp_ϵ̇_E(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
-             plt.Pc[3][] .= P.c
-             plt.Vx[3][] .= V.xc
-             plt.Vy[3][] .= V.yc
-             plt.Sr[3][] .= log10.(ϵ̇_E.c)
-             plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
-             plt.Vx.colorrange[] = (min(-1e-10,minimum(V.xc)), max(1e-10,maximum(V.xc)))
-             plt.Vy.colorrange[] = (min(-1e-10,minimum(V.yc)), max(1e-10,maximum(V.yc)))
-             plt.Sr.colorrange[] = (min(-1,log10(minimum(ϵ̇_E.c))), max(1,log10(maximum(ϵ̇_E.c))))
- 
-             scatterlines!(axs.Er, itercounts ./ nx, log10.(res_newton), color=:purple)
- 
-             display(fig)
-             
-             println("Newton residual = ", χ, "; λ = ", λ, "; total iteration count: ", it)
+            push!(itercounts, it)
+            push!(res_newton, χ)
+
+            # update plot -> works only for cpu backend
+            comp_ϵ̇_E(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
+            plt.Pc[3][] .= P.c
+            plt.Vx[3][] .= V.xc
+            plt.Vy[3][] .= V.yc
+            plt.Sr[3][] .= log10.(ϵ̇_E.c)
+            plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
+            plt.Vx.colorrange[] = (min(-1e-10,minimum(V.xc)), max(1e-10,maximum(V.xc)))
+            plt.Vy.colorrange[] = (min(-1e-10,minimum(V.yc)), max(1e-10,maximum(V.yc)))
+            plt.Sr.colorrange[] = (min(-1,log10(minimum(ϵ̇_E.c))), max(1,log10(maximum(ϵ̇_E.c))))
+
+            scatterlines!(axs.Er, itercounts ./ nx, log10.(res_newton), color=:purple)
+
+            display(fig)
+            
+            println("Newton residual = ", χ, "; λ = ", λ, "; total iteration count: ", it)
          end    
          comp_divV!(divV, V, iΔx, iΔy)
          ω = tplNorm(divV, Inf) / ω_ref # correct scaling?
@@ -344,5 +357,5 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 end
 
 
-outfields = nonlinear_inclusion(n=64, ninc=4, η_ratio=5.,γ_factor=100., niter=6000, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3);
+outfields = nonlinear_inclusion(n=128, ninc=4, η_ratio=10.,γ_factor=100., niter=100000, ϵ_ph=1e-5, ϵ_cg=1e-5, ϵ_newton=1e-5, verbose=true);
 

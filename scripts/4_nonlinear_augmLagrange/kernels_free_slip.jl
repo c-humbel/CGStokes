@@ -16,62 +16,6 @@
 end
 
 
-# dimensions for kernel launch: ny+2
-@kernel inbounds=true function set_dirichlet_x!(V)
-    j, = @index(Global, NTuple)
-    if j <= size(V.xc, 2)
-        V.xc[1  , j] = 0.
-        V.xc[end, j] = 0.
-    end
-    if j <= size(V.xv, 2)
-        V.xv[1  , j] = 0.
-        V.xv[end, j] = 0.
-    end
-end
-
-
-# dimensions for kernel launch: nx+2
-@kernel inbounds=true function set_dirichlet_y!(V)
-    i, = @index(Global, NTuple)
-    if i <= size(V.yc, 1)
-        V.yc[i, 1  ] = 0.
-        V.yc[i, end] = 0.
-    end
-    if i <= size(V.yv, 1)
-        V.yv[i, 1  ] = 0.
-        V.yv[i, end] = 0.
-    end
-end
-
-
-# dimensions for kernel launch: ny+2
-@kernel inbounds=true function set_neumann_x!(V)
-    j, = @index(Global, NTuple)
-    if j <= size(V.yc, 2)
-        V.yc[1  , j] = V.yc[2    , j]
-        V.yc[end, j] = V.yc[end-1, j]
-    end
-    if j <= size(V.xv, 2)
-        V.yv[1  , j] = V.yv[2    , j]
-        V.yv[end, j] = V.yv[end-1, j]
-    end
-end
-
-
-# dimensions for kernel launch: nx+2
-@kernel inbounds=true function set_neumann_y!(V)
-    i, = @index(Global, NTuple)
-    if i <= size(V.xc, 1)
-        V.xc[i, 1  ] = V.xc[i, 2    ]
-        V.xc[i, end] = V.xc[i, end-1]
-    end
-    if i <= size(V.xv, 1)
-        V.xv[i, 1  ] = V.xv[i, 2    ]
-        V.xv[i, end] = V.xv[i, end-1]
-    end
-end
-
-
 # dimensions for kernel launch: nx+1, ny+1
 @kernel inbounds=true function compute_P_τ!(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
     i, j = @index(Global, NTuple)
@@ -154,6 +98,8 @@ end
 @kernel inbounds=true function compute_R!(R, P, τ, ρg, iΔx, iΔy)
     i, j = @index(Global, NTuple)
 
+    # TODO: change ρg → f and make it a "velocity type" variable
+
     ### residual in horizontal (x) direction
     ## including Neumann BC on at top and bottom boundary
     ## for velocities associated with cell centers (V.xc)
@@ -162,9 +108,9 @@ end
         # inner values in x direction
 
         # residual in x direction on the interface
-        R.xc[i, j] = (-(τ.c.xx[i, j  ] - τ.c.xx[i-1, j]) * iΔx
-                     - (τ.v.xy[i, j+1] - τ.v.xy[i  , j]) * iΔy
-                     + (P.c[i, j] - P.c[i-1, j]) * iΔx)
+        R.xc[i, j] = -( (τ.c.xx[i, j  ] - τ.c.xx[i-1, j]) * iΔx
+                     + (τ.v.xy[i, j+1] - τ.v.xy[i  , j]) * iΔy
+                     - (P.c[i, j] - P.c[i-1, j]) * iΔx)
     end
     ## for velocities associated with cell corners (V.xv)
     if 1 < i < size(R.xv, 1) && j <= size(R.xv, 2)
@@ -174,9 +120,9 @@ end
         τxy_b = j > 1 ? τ.c.xy[i-1, j-1] : 0. # zero stress at the bottom boundary
         τxy_t = j < size(R.xv, 2) ? τ.c.xy[i-1, j] : 0.  # zero stress at the top boundary
 
-        R.xv[i, j] = (-(τ.v.xx[i, j] - τ.v.xx[i-1, j]) * iΔx
-                     - (τxy_t - τxy_b) * iΔy
-                     + (P.v[i, j] - P.v[i-1, j]) * iΔx)
+        R.xv[i, j] = -( (τ.v.xx[i, j] - τ.v.xx[i-1, j]) * iΔx
+                     + (τxy_t - τxy_b) * iΔy
+                     - (P.v[i, j] - P.v[i-1, j]) * iΔx)
     end
 
     ### residual in vertical (y) direction
@@ -185,20 +131,20 @@ end
     if i <= size(R.yc, 1) && 1 < j < size(R.yc, 2)
         # inner values in y direction
         # all values in x direction        
-        R.yc[i, j] = (-(τ.c.yy[i  , j] - τ.c.yy[i, j-1]) * iΔy
-                     - (τ.v.xy[i+1, j] - τ.v.xy[i, j  ]) * iΔx
-                     + ( P.c[i, j] -  P.c[i, j-1]) * iΔy
-                     + (ρg.c[i, j] + ρg.c[i, j-1]) * 0.5)
+        R.yc[i, j] = -( (τ.c.yy[i  , j] - τ.c.yy[i, j-1]) * iΔy
+                     + (τ.v.xy[i+1, j] - τ.v.xy[i, j  ]) * iΔx
+                     - ( P.c[i, j] -  P.c[i, j-1]) * iΔy
+                     - (ρg.c[i, j] + ρg.c[i, j-1]) * 0.5)
     end
     ## for velocities associated with cell corners (V.yv)
     if i <= size(R.yv, 1) && 1 < j < size(R.yv, 2)
         τxy_l = i > 1 ? τ.c.xy[i-1, j-1] : 0.
         τxy_r = i < size(R.yv, 1) ? τ.c.xy[i, j-1] : 0.
 
-        R.yv[i, j] = (-(τ.v.yy[i, j] - τ.v.yy[i, j-1]) * iΔy
-                     - (τxy_r - τxy_l) * iΔx
-                     + ( P.v[i, j] -  P.v[i, j-1]) * iΔy
-                     + (ρg.v[i, j] + ρg.v[i, j-1]) * 0.5)
+        R.yv[i, j] = -( (τ.v.yy[i, j] - τ.v.yy[i, j-1]) * iΔy
+                     + (τxy_r - τxy_l) * iΔx
+                     - ( P.v[i, j] -  P.v[i, j-1]) * iΔy
+                     - (ρg.v[i, j] + ρg.v[i, j-1]) * 0.5)
     end
 
     # Residuals corresponding to cells affected by Dirichlet BC are left zero
