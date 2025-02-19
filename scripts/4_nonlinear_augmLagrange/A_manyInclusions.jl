@@ -188,7 +188,7 @@ function nonlinear_inclusions(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_fact
     # Powell Hestenes
     it = 0
     while it < niter && ω > ϵ_ph
-        verbose && println("Iteration ", it_P)
+        verbose && println("Iteration ", length(itercounts))
         tplSet!(P₀, P)
 
         compute_R!(R, P, η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
@@ -292,5 +292,5 @@ function nonlinear_inclusions(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_fact
 end
 
 
-n = 128
-outfields = nonlinear_inclusions(n=n, ninc=4, η_ratio=10.,γ_factor=100., niter=2000*n, ϵ_ph=1e-5, ϵ_cg=1e-5, ϵ_newton=1e-5);
+n = 64
+outfields = nonlinear_inclusions(n=n, ninc=4, η_ratio=5.,γ_factor=10., niter=30000, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3);
