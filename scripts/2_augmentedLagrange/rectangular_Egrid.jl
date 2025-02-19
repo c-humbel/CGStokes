@@ -177,7 +177,7 @@ end
             R.yv[i, j] = ( (τyy_t - τyy_b) / dy
                          + (τxy_r - τxy_l) / dx
                          - ( P.v[i, j] -  P.v[i, j-1]) / dy
-                         + (ρg.v[i, j] + ρg.v[i, j-1]) * 0.5)
+                         - (ρg.v[i, j] + ρg.v[i, j-1]) * 0.5)
         end
     end
 

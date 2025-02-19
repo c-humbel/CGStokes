@@ -1,5 +1,6 @@
 using Enzyme
 using Random
+using LinearAlgebra
 
 include("../scripts/4_nonlinear_augmLagrange/square_domain_free_slip.jl")
 
@@ -127,6 +128,42 @@ function construct_jacobian(n=5; seed=1)
 end
 
 
+function construct_preconditioner_diag(n=5, seed=1234)
+    rng = Random.MersenneTwister(seed)
+    nx, ny = n, n
+    dx, dy = 1/nx, 1/ny
+
+    γ    = 5.0
+    q    = 1.33
+    B    = (c=ones(nx, ny), v=ones(nx+1, ny+1))
+    P    = (c=zeros(nx, ny), v=zeros(nx+1, ny+1))
+    ρg   = deepcopy(P)
+    η    = deepcopy(P)
+    P₀   = deepcopy(P)
+    ϵ̇_bg = eps()
+    V    = (xc=rand(rng, nx+1, ny  ), yc=rand(rng, nx  , ny+1),
+            xv=rand(rng, nx+2, ny+1), yv=rand(rng, nx+1, ny+2))
+    R    = (xc=zeros(nx+1, ny  ), yc=zeros(nx  , ny+1),
+            xv=zeros(nx+2, ny+1), yv=zeros(nx+1, ny+2))
+
+    invM = deepcopy(R)
+    
+    fill!.(values(B), 1)
+
+    # compute viscosity
+    compute_R!(R, P, η, P₀, V, ρg, B, q, ϵ̇_bg, dx, dy, γ)
+
+    initialise_invM(invM, η, dx, dy, γ)
+
+    N_c = (n+1) * n
+    N_v = (n+2) * (n+1)
+
+    inv_m = cat(reshape(invM.xc, N_c), reshape(invM.yc, N_c),
+                reshape(invM.xv, N_v), reshape(invM.yv, N_v), dims=1)
+    return inv_m
+end
+
+
 # check that Jacobian is (almost) symmetric
 Jin = construct_jacobian();
 
@@ -136,3 +173,12 @@ Jin = construct_jacobian();
 
 # check that eigenvalues are real and positive
 @assert eigmin(-Jin) > 0
+
+# compare preconditioner and jacobian
+J = construct_jacobian_with_boundary();
+m = construct_preconditioner_diag();
+
+diagJ = diag(-J);
+m_ex = zeros(size(m));
+m_ex[diagJ .!= 0] = inv.(diagJ[diagJ .!= 0]);
+maximum(abs.(m - m_ex))
