@@ -192,11 +192,12 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
            Sr=Axis(fig[3,1][1,1], aspect=1, title="strain rate"),
            Er=Axis(fig[3,2][1,1], title="Convergence of Newton Method", xlabel="iterations / nx", ylabel="residual norm"))
 
-    plt = (Bc=heatmap!(axs.Bc, B.c, colormap=ColorSchemes.viridis),
-           Pc=heatmap!(axs.Pc, P.c, colormap=ColorSchemes.viridis),
-           Vx=heatmap!(axs.Vx, V.xc, colormap=ColorSchemes.viridis),
-           Vy=heatmap!(axs.Vy, V.yc, colormap=ColorSchemes.viridis),
-           Sr=heatmap!(axs.Sr, ϵ̇_E.c, colormap=ColorSchemes.viridis))
+    plt = (Bc=heatmap!(axs.Bc, Array(B.c), colormap=ColorSchemes.viridis),
+           Pc=heatmap!(axs.Pc, Array(P.c), colormap=ColorSchemes.viridis),
+           Vx=heatmap!(axs.Vx, Array(V.xc), colormap=ColorSchemes.viridis),
+           Vy=heatmap!(axs.Vy, Array(V.yc), colormap=ColorSchemes.viridis),
+           Sr=heatmap!(axs.Sr, Array(ϵ̇_E.c), colormap=ColorSchemes.viridis))
+
     cbar= (B=Colorbar(fig[1, 1][1, 2], plt.Bc),
            P=Colorbar(fig[1, 2][1, 2], plt.Pc),
            Vx=Colorbar(fig[2, 1][1, 2], plt.Vx),
@@ -236,7 +237,6 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
         tplSet!(P₀, P)
 
         # r = f - div τ + grad p - grad( div v)
-        # now: r = ρg + div τ - grad(p_0 - div v)
         comp_P_τ(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
         comp_R(R, P, τ, ρg, iΔx, iΔy)
 
@@ -292,7 +292,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 up_D!(D, K, invM, β)
 
                 # compute residual norm
-                δ = tplNorm(K, Inf) / δ_ref # correct scaling?
+                δ = tplNorm(K, Inf) / δ_ref
                 it += 1
 
                 if verbose && it % 100 == 0
@@ -328,10 +328,10 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
             # update plot -> works only for cpu backend
             comp_ϵ̇_E(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
-            plt.Pc[3][] .= P.c
-            plt.Vx[3][] .= V.xc
-            plt.Vy[3][] .= V.yc
-            plt.Sr[3][] .= log10.(ϵ̇_E.c)
+            plt.Pc[3][] .= Array(P.c)
+            plt.Vx[3][] .= Array(V.xc)
+            plt.Vy[3][] .= Array(V.yc)
+            plt.Sr[3][] .= log10.(Array(ϵ̇_E.c))
             plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
             plt.Vx.colorrange[] = (min(-1e-10,minimum(V.xc)), max(1e-10,maximum(V.xc)))
             plt.Vy.colorrange[] = (min(-1e-10,minimum(V.yc)), max(1e-10,maximum(V.yc)))
@@ -344,7 +344,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             println("Newton residual = ", χ, "; λ = ", λ, "; total iteration count: ", it)
          end    
          comp_divV!(divV, V, iΔx, iΔy)
-         ω = tplNorm(divV, Inf) / ω_ref # correct scaling?
+         ω = tplNorm(divV, Inf) / ω_ref
          println("Pressure residual = ", ω, ", Newton residual = ", χ, ", CG residual = ", δ)
      end
  
@@ -352,5 +352,5 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 end
 
 
-outfields = nonlinear_inclusion(n=128, ninc=3, η_ratio=5.,γ_factor=100., niter=100000, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4, verbose=true);
+#nonlinear_inclusion(n=128, ninc=3, η_ratio=5.,γ_factor=100., niter=100000, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4, verbose=true);
 
