@@ -47,7 +47,7 @@ function generate_inclusions(ninc, xs, ys, rng)
 end
 
 # copied from 2_augmentedLagrange/D_ManyInclusions_Egrid.jl
-function initialise_B_ρ!(B, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly; seed=1234, ninc=5)
+function initialise_B_f!(B, f, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly; seed=1234, ninc=5)
     rng = MersenneTwister(seed)
 
     # generate radius and location inclusions
@@ -76,17 +76,27 @@ function initialise_B_ρ!(B, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx,
 
     # set viscosity and body force values
     η_loc  = (c=Array(B.c), v=Array(B.v))
-    ρg_loc = (c=Array(ρg.c), v=Array(ρg.v))
+    ρg_loc = (xc=Array(f.xc), yc=Array(f.yc), xv=Array(f.xv), yv=Array(f.yv))
     η_loc.c  .= η_mat
     η_loc.v  .= η_mat
-    ρg_loc.c .= 0.
-    ρg_loc.v .= 0.
+    for I = eachindex(ρg_loc)
+        ρg_loc[I] .= 0
+    end
+
     for j = eachindex(yc)
         for i = eachindex(xc)
             for ((x, y), r, η_rel) ∈ zip(centers, radii, η_ratios)
                 if (xc[i] - x)^2 + (yc[j] - y)^2 <= r^2
                     η_loc.c[i, j]  = η_rel * η_mat
-                    ρg_loc.c[i, j] = Δρg
+                    break
+                end
+            end
+        end
+        
+        for i = eachindex(xv)
+            for ((x, y), r) ∈ zip(centers, radii)
+                if (xv[i] - x)^2 + (yc[j] - y)^2 <= r^2
+                    ρg_loc.yv[i, j]  = Δρg
                     break
                 end
             end
@@ -98,17 +108,23 @@ function initialise_B_ρ!(B, ρg, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx,
             for ((x, y), r, η_rel) ∈ zip(centers, radii, η_ratios)
                 if (xv[i] - x)^2 + (yv[j] - y)^2 <= r^2
                     η_loc.v[i, j]  = η_rel * η_mat
-                    ρg_loc.v[i, j] = Δρg
+                    break
+                end
+            end
+        end
+
+        for i = eachindex(xc)
+            for ((x, y), r) ∈ zip(centers, radii)
+                if (xc[i] - x)^2 + (yv[j] - y)^2 <= r^2
+                    ρg_loc.yc[i, j]  = Δρg
                     break
                 end
             end
         end
     end
     
-    copyto!(B.c, η_loc.c)
-    copyto!(B.v, η_loc.v)
-    copyto!(ρg.c, ρg_loc.c)
-    copyto!(ρg.v, ρg_loc.v)
+    tplSet!(B, η_loc)
+    tplSet!(f, ρg_loc)
 
     return nothing
 end
@@ -143,7 +159,6 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     P₀   = deepcopy(P)  # old pressure
     P̄    = deepcopy(P)  # memory needed for auto-differentiation
     divV = deepcopy(P)  # velocity divergence
-    ρg   = deepcopy(P)  # body force
     B    = deepcopy(P)  # prefactor of constituitive relation
     ϵ̇_E  = deepcopy(P)  # invariant of strain rate
     τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx, ny),
@@ -163,10 +178,11 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     R    = deepcopy(V)  # nonlinear Residual
     K    = deepcopy(V)  # Residuals in CG
     Q    = deepcopy(V)  # Jacobian of compute_R wrt. V, multiplied by some vector (used for autodiff)
+    f    = deepcopy(V)  # body force
     invM = deepcopy(V)  # preconditioner, cells correspoinding to Dirichlet BC are zero
 
     
-    initialise_B_ρ!(B, ρg, B_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly; ninc=ninc)
+    initialise_B_f!(B, f, B_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly; ninc=ninc)
 
     γ = γ_factor * tplNorm(B, Inf)
 
@@ -177,8 +193,8 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     ω = Inf # Pressure
 
     
-    χ_ref = tplNorm(ρg, Inf) # is this correct ?
-    ω_ref = tplNorm(ρg, Inf) * Lx / tplNorm(B, Inf)
+    χ_ref = tplNorm(f, Inf) # is this correct ?
+    ω_ref = tplNorm(f, Inf) * Lx / tplNorm(B, Inf)
 
     # visualisation
     itercounts = []
@@ -232,25 +248,24 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     # Powell Hestenes
     it = 0
     while it < niter && ω > ϵ_ph
-        verbose && println("Iteration ", length(itercounts))
         # p_0 = p
         tplSet!(P₀, P)
 
         # r = f - div τ + grad p - grad( div v)
         comp_P_τ(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-        comp_R(R, P, τ, ρg, iΔx, iΔy)
+        comp_R(R, P, τ, f, iΔx, iΔy)
 
         χ = tplNorm(R, Inf) / χ_ref
 
         # Newton iteration
         while it < niter && χ > ϵ_newton
             # reference 
-            δ_ref = tplNorm(ρg, Inf)
+            δ_ref = tplNorm(f, Inf)
             # initialise preconditioner
             # ϵ̇_E = 0.5 * ϵ̇_ij * ϵ̇_ij
             comp_ϵ̇_E(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
             # M = diag (Dv r)
-            init_invM!(invM, ϵ̇_E, B, q, iΔx, iΔy, γ)
+            init_invM!(invM, V, ϵ̇_E, B, q, iΔx, iΔy, γ)
 
             # iteration zero
             # compute residual for CG,
@@ -258,7 +273,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             tplSet!(V̄, dV)
             # use K instead of R as first argument because it might get overwritten in autodiff,
             # but it doesn't matter for K since we assign a new value anyway
-            jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+            jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             tplSet!(K, R)
             tplSub!(K, Q)
 
@@ -271,7 +286,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 # compute α
                 # α = k^T * inv(M) * k / (d^T * Dv r * d)
                 tplSet!(V̄, D)
-                jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+                jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                 α = μ / tplDot(D, Q)
 
                 # dv += α d
@@ -280,7 +295,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 # recompute residual
                 # k = r - Dv r * dv
                 tplSet!(V̄, dV)
-                jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+                jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                 tplSet!(K, R)
                 tplSub!(K, Q)
 
@@ -306,7 +321,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             tplSub!(V̄, dV)
 
             comp_P_τ(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-            comp_R(R, P, τ, ρg, iΔx, iΔy)
+            comp_R(R, P, τ, f, iΔx, iΔy)
 
             χ_new = tplNorm(R, Inf) / χ_ref
             λ = 1.
@@ -315,7 +330,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 tplScale!(dV, inv(MathConstants.golden))
                 tplSub!(V̄, dV)
                 comp_P_τ(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-                comp_R(R, P, τ, ρg, iΔx, iΔy)
+                comp_R(R, P, τ, f, iΔx, iΔy)
                 λ /= MathConstants.golden
                 χ_new = tplNorm(R, Inf) / χ_ref
             end
@@ -341,11 +356,11 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
             display(fig)
             
-            println("Newton residual = ", χ, "; λ = ", λ, "; total iteration count: ", it)
-         end    
-         comp_divV!(divV, V, iΔx, iΔy)
-         ω = tplNorm(divV, Inf) / ω_ref
-         println("Pressure residual = ", ω, ", Newton residual = ", χ, ", CG residual = ", δ)
+            verbose && println("Newton residual = ", χ, "; λ = ", λ, "; total iteration count: ", it)
+        end    
+        comp_divV!(divV, V, iΔx, iΔy)
+        ω = tplNorm(divV, Inf) / ω_ref
+        verbose && println("Pressure residual = ", ω, ", Newton residual = ", χ, ", CG residual = ", δ)
      end
  
      return it, P, V, R

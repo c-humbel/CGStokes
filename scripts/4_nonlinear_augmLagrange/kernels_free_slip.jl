@@ -95,10 +95,8 @@ end
 
 
 # dimensions for kernel launch: nx+2, ny+2
-@kernel inbounds=true function compute_R!(R, P, τ, ρg, iΔx, iΔy)
+@kernel inbounds=true function compute_R!(R, P, τ, f, iΔx, iΔy)
     i, j = @index(Global, NTuple)
-
-    # TODO: change ρg → f and make it a "velocity type" variable
 
     ### residual in horizontal (x) direction
     ## including Neumann BC on at top and bottom boundary
@@ -108,9 +106,10 @@ end
         # inner values in x direction
 
         # residual in x direction on the interface
-        R.xc[i, j] = -( (τ.c.xx[i, j  ] - τ.c.xx[i-1, j]) * iΔx
+        R.xc[i, j] = -((τ.c.xx[i, j  ] - τ.c.xx[i-1, j]) * iΔx
                      + (τ.v.xy[i, j+1] - τ.v.xy[i  , j]) * iΔy
-                     - (P.c[i, j] - P.c[i-1, j]) * iΔx)
+                     - (P.c[i, j] - P.c[i-1, j]) * iΔx
+                     - f.xc[i, j])
     end
     ## for velocities associated with cell corners (V.xv)
     if 1 < i < size(R.xv, 1) && j <= size(R.xv, 2)
@@ -120,9 +119,10 @@ end
         τxy_b = j > 1 ? τ.c.xy[i-1, j-1] : 0. # zero stress at the bottom boundary
         τxy_t = j < size(R.xv, 2) ? τ.c.xy[i-1, j] : 0.  # zero stress at the top boundary
 
-        R.xv[i, j] = -( (τ.v.xx[i, j] - τ.v.xx[i-1, j]) * iΔx
+        R.xv[i, j] = -((τ.v.xx[i, j] - τ.v.xx[i-1, j]) * iΔx
                      + (τxy_t - τxy_b) * iΔy
-                     - (P.v[i, j] - P.v[i-1, j]) * iΔx)
+                     - (P.v[i, j] - P.v[i-1, j]) * iΔx
+                     - f.xv[i, j])
     end
 
     ### residual in vertical (y) direction
@@ -131,20 +131,20 @@ end
     if i <= size(R.yc, 1) && 1 < j < size(R.yc, 2)
         # inner values in y direction
         # all values in x direction        
-        R.yc[i, j] = -( (τ.c.yy[i  , j] - τ.c.yy[i, j-1]) * iΔy
+        R.yc[i, j] = -((τ.c.yy[i  , j] - τ.c.yy[i, j-1]) * iΔy
                      + (τ.v.xy[i+1, j] - τ.v.xy[i, j  ]) * iΔx
                      - ( P.c[i, j] -  P.c[i, j-1]) * iΔy
-                     - (ρg.c[i, j] + ρg.c[i, j-1]) * 0.5)
+                     - f.yc[i, j])
     end
     ## for velocities associated with cell corners (V.yv)
     if i <= size(R.yv, 1) && 1 < j < size(R.yv, 2)
         τxy_l = i > 1 ? τ.c.xy[i-1, j-1] : 0.
         τxy_r = i < size(R.yv, 1) ? τ.c.xy[i, j-1] : 0.
 
-        R.yv[i, j] = -( (τ.v.yy[i, j] - τ.v.yy[i, j-1]) * iΔy
+        R.yv[i, j] = -((τ.v.yy[i, j] - τ.v.yy[i, j-1]) * iΔy
                      + (τxy_r - τxy_l) * iΔx
                      - ( P.v[i, j] -  P.v[i, j-1]) * iΔy
-                     - (ρg.v[i, j] + ρg.v[i, j-1]) * 0.5)
+                     - f.yv[i, j])
     end
 
     # Residuals corresponding to cells affected by Dirichlet BC are left zero
@@ -194,98 +194,132 @@ end
 
 
 # dimensions for kernel launch: nx+2, ny+2
-@kernel inbounds=true function initialise_invM(invM, ϵ̇_E, B, q, iΔx, iΔy, γ)
+@kernel inbounds=true function initialise_invM(invM, V, ϵ̇_E, B, q, iΔx, iΔy, γ)
     i, j = @index(Global, NTuple)
 
-    ηc(i, j) = 0.5*B.c[i, j] * ϵ̇_E.c[i, j] ^ (0.5q - 1)
-    ηv(i, j) = 0.5*B.v[i, j] * ϵ̇_E.v[i, j] ^ (0.5q - 1)
-    ## inner points
     # x direction, cell centers
-    if 1 < i < size(invM.xc, 1) && 1 < j < size(invM.xc, 2)
-        mij = ( 2iΔx^2 * (ηc(i-1, j) + ηc(i, j))
-               + iΔy^2 * (ηv(i, j) + ηv(i, j+1))
-               + 2γ * iΔx^2)
-        invM.xc[i, j] = inv(mij)
+    if 1 < i < size(invM.xc, 1) && j <= size(invM.xc, 2)
+        dVxdx⁻ = (V.xc[i, j] - V.xc[i-1, j]) * iΔx
+        dVxdx⁺ = (V.xc[i+1, j] - V.xc[i, j]) * iΔx
+        dVxdy⁻ = j > 1 ? (V.xc[i, j] - V.xc[i, j-1]) * iΔy : 0.
+        dVxdy⁺ = j < size(invM.xc, 2) ? (V.xc[i, j+1] - V.xc[i, j]) * iΔy : 0.
+        dVydx⁻ = (V.yc[i, j] - V.yc[i-1, j]) * iΔx
+        dVydx⁺ = (V.yc[i, j+1] - V.yc[i-1, j+1]) * iΔx
+
+
+        mij_1  = B.c[i-1, j] * iΔx^2 * (
+                    ϵ̇_E.c[i-1, j]^(0.5q - 1)
+                  + ϵ̇_E.c[i-1, j]^(0.5q - 2) * (0.5q - 1) * dVxdx⁻^2)
+
+        mij_2  = B.c[i, j] * iΔx^2 * (
+                    ϵ̇_E.c[i, j]^(0.5q - 1)
+                  + ϵ̇_E.c[i, j]^(0.5q - 2) * (0.5q - 1) * dVxdx⁺^2)
+
+        mij_3 = j > 1 ? B.v[i, j] * 0.5 * iΔy^2 * (
+                    ϵ̇_E.v[i, j]^(0.5q - 1)
+                  + ϵ̇_E.v[i, j]^(0.5q - 2) * (0.5q - 1) * 0.25*(dVxdy⁻ + dVydx⁻)^2
+                ) : 0.
+
+        mij_4 = j < size(invM.xc, 2) ? B.v[i, j+1] * 0.5 * iΔy^2 * (
+                    ϵ̇_E.v[i, j+1]^(0.5q - 1)
+                  + ϵ̇_E.v[i, j+1]^(0.5q - 2) * (0.5q - 1) * 0.25 * (dVxdy⁺ + dVydx⁺)^2
+                ) : 0.
+                  
+        invM.xc[i, j] = inv(mij_1 + mij_2 + mij_3 + mij_4 + 2γ * iΔx^2)
     end
 
     # y direction, cell centers
-    if 1 < i < size(invM.yc, 1) && 1 < j < size(invM.yc, 2)
-        mij = ( 2iΔy^2 * (ηc(i, j-1) + ηc(i, j))
-               + iΔx^2 * (ηv(i, j) + ηv(i+1, j))
-               + 2γ * iΔy^2)
-        invM.yc[i, j] = inv(mij)
+    if i <= size(invM.yc, 1) && 1 < j < size(invM.yc, 2)
+        dVydy⁻ = (V.yc[i, j] - V.yc[i-1, j]) * iΔy
+        dVydy⁺ = (V.yc[i+1, j] - V.yc[i, j]) * iΔy
+        dVxdy⁻ = (V.xc[i, j] - V.xc[i, j-1]) * iΔy
+        dVxdy⁺ = (V.xc[i, j+1] - V.xc[i, j]) * iΔy
+        dVydx⁻ = i > 1 ? (V.yc[i, j] - V.yc[i-1, j]) * iΔx : 0.
+        dVydx⁺ = i < size(invM.yc, 1) ? (V.yc[i, j+1] - V.yc[i-1, j+1]) * iΔx : 0.
+
+        mij_1  = B.c[i, j-1] * iΔy^2 * (
+                    ϵ̇_E.c[i, j-1]^(0.5q - 1)
+                  + ϵ̇_E.c[i, j-1]^(0.5q - 2) * (0.5q - 1) * dVydy⁻^2)
+
+        mij_2  = B.c[i, j] * iΔy^2 * (
+                    ϵ̇_E.c[i, j]^(0.5q - 1)
+                  + ϵ̇_E.c[i, j]^(0.5q - 2) * (0.5q - 1) * dVydy⁺^2)
+
+        mij_3 = i > 1 ? B.v[i, j] * 0.5 * iΔx^2 * (
+                    ϵ̇_E.v[i, j]^(0.5q - 1)
+                  + ϵ̇_E.v[i, j]^(0.5q - 2) * (0.5q - 1) * 0.25*(dVxdy⁻ + dVydx⁻)^2
+                ) : 0.
+
+        mij_4 = i < size(invM.yc, 1) ? B.v[i+1, j] * 0.5 * iΔx^2 * (
+                    ϵ̇_E.v[i+1, j]^(0.5q - 1)
+                  + ϵ̇_E.v[i+1, j]^(0.5q - 2) * (0.5q - 1) * 0.25 * (dVxdy⁺ + dVydx⁺)^2
+                ) : 0.
+                  
+        invM.yc[i, j] = inv(mij_1 + mij_2 + mij_3 + mij_4 + 2γ * iΔy^2)
     end
 
     # x direction, vertices
-    if 1 < i < size(invM.xv, 1) && 1 < j < size(invM.xv, 2)
-        mij = ( 2iΔx^2 * (ηv(i-1, j) + ηv(i, j))
-               + iΔy^2 * (ηc(i-1, j-1) + ηc(i-1, j))
-               + 2γ * iΔx^2)
-        invM.xv[i, j] = inv(mij)
+    if 1 < i < size(invM.xv, 1) && j <= size(invM.xv, 2)
+        dVxdx⁻ = (V.xv[i, j] - V.xv[i-1, j]) * iΔx
+        dVxdx⁺ = (V.xv[i+1, j] - V.xv[i, j]) * iΔx
+        dVxdy⁻ = j > 1 ? (V.xv[i, j] - V.xv[i, j-1]) * iΔy : 0.
+        dVxdy⁺ = j < size(invM.xv, 2) ? (V.xv[i, j+1] - V.xv[i, j]) * iΔy : 0.
+        dVydx⁻ = (V.yv[i, j] - V.yv[i-1, j]) * iΔx
+        dVydx⁺ = (V.yv[i, j+1] - V.yv[i-1, j+1]) * iΔx
+
+
+        mij_1  = B.v[i-1, j] * iΔx^2 * (
+                    ϵ̇_E.v[i-1, j]^(0.5q - 1)
+                  + ϵ̇_E.v[i-1, j]^(0.5q - 2) * (0.5q - 1) * dVxdx⁻^2)
+
+        mij_2  = B.v[i, j] * iΔx^2 * (
+                    ϵ̇_E.v[i, j]^(0.5q - 1)
+                  + ϵ̇_E.v[i, j]^(0.5q - 2) * (0.5q - 1) * dVxdx⁺^2)
+
+        
+        mij_3 = j > 1 ? B.c[i, j-1] * 0.5 * iΔy^2 * (
+                    ϵ̇_E.c[i, j-1]^(0.5q - 1)
+                  + ϵ̇_E.c[i, j-1]^(0.5q - 2) * (0.5q - 1) * 0.25*(dVxdy⁻ + dVydx⁻)^2
+                ) : 0.
+
+        mij_4 = j < size(invM.xv, 2) ? B.c[i, j] * 0.5 * iΔy^2 * (
+                    ϵ̇_E.c[i, j]^(0.5q - 1)
+                  + ϵ̇_E.c[i, j]^(0.5q - 2) * (0.5q - 1) * 0.25 * (dVxdy⁺ + dVydx⁺)^2
+                ) : 0.
+                  
+        invM.xv[i, j] = inv(mij_1 + mij_2 + mij_3 + mij_4 + 2γ * iΔx^2)
     end
 
     # y direction, vertices
     if 1 < i < size(invM.yv, 1) && 1 < j < size(invM.yv, 2)
-        mij = ( 2iΔy^2 * (ηv(i, j-1) + ηv(i, j))
-               + iΔx^2 * (ηc(i-1, j-1) + ηc(i, j-1))
-               + 2γ * iΔy^2)
-        invM.yv[i, j] = inv(mij)
+        dVydy⁻ = (V.yv[i, j] - V.yv[i-1, j]) * iΔy
+        dVydy⁺ = (V.yv[i+1, j] - V.yv[i, j]) * iΔy
+        dVxdy⁻ = (V.xv[i, j] - V.xv[i, j-1]) * iΔy
+        dVxdy⁺ = (V.xv[i, j+1] - V.xv[i, j]) * iΔy
+        dVydx⁻ = i > 1 ? (V.yv[i, j] - V.yv[i-1, j]) * iΔx : 0.
+        dVydx⁺ = i < size(invM.yv, 1) ? (V.yv[i, j+1] - V.yv[i-1, j+1]) * iΔx : 0.
+
+        mij_1  = B.v[i, j-1] * iΔy^2 * (
+                    ϵ̇_E.v[i, j-1]^(0.5q - 1)
+                  + ϵ̇_E.v[i, j-1]^(0.5q - 2) * (0.5q - 1) * dVydy⁻^2)
+
+        mij_2  = B.v[i, j] * iΔy^2 * (
+                    ϵ̇_E.v[i, j]^(0.5q - 1)
+                  + ϵ̇_E.v[i, j]^(0.5q - 2) * (0.5q - 1) * dVydy⁺^2)
+
+        mij_3 = i > 1 ? B.c[i, j] * 0.5 * iΔx^2 * (
+                    ϵ̇_E.c[i-1, j]^(0.5q - 1)
+                  + ϵ̇_E.c[i-1, j]^(0.5q - 2) * (0.5q - 1) * 0.25*(dVxdy⁻ + dVydx⁻)^2
+                ) : 0.
+
+        mij_4 = i < size(invM.yv, 1) ? B.c[i+1, j] * 0.5 * iΔx^2 * (
+                    ϵ̇_E.c[i, j]^(0.5q - 1)
+                  + ϵ̇_E.c[i, j]^(0.5q - 2) * (0.5q - 1) * 0.25 * (dVxdy⁺ + dVydx⁺)^2
+                ) : 0.
+                  
+        invM.yv[i, j] = inv(mij_1 + mij_2 + mij_3 + mij_4 + 2γ * iΔy^2)
     end
 
-    ## Neumann boundary points
-    # x direction, cell centers
-    if 1 < i < size(invM.xc, 1)
-        if j == 1
-            invM.xc[i, j] = inv(2iΔx^2 * (ηc(i-1, j) + ηc(i, j))
-                               + iΔy^2 * (ηv(i, j+1))
-                               + 2γ * iΔx^2)
-        elseif j == size(invM.xc, 2)
-            invM.xc[i, j] = inv(2iΔx^2 * (ηc(i-1, j) + ηc(i, j))
-                               + iΔy^2 * (ηv(i  , j))
-                               + 2γ * iΔx^2)
-        end
-    end
-    # y direction, cell centers
-    if 1 < j < size(invM.yc, 2)
-        if i == 1
-            invM.yc[i, j] = inv(2iΔy^2 * (ηc(i, j-1) + ηc(i, j))
-                               + iΔx^2 * (ηv(i+1, j))
-                               + 2γ * iΔy^2)
-        end
-        if i == size(invM.yc, 1)
-            invM.yc[i, j] = inv(2iΔy^2 * (ηc(i, j-1) + ηc(i, j))
-                               + iΔx^2 * (ηv(i, j  ))
-                               + 2γ * iΔy^2)
-        end
-    end
-    # x direction, vertices
-    if 1 < i < size(invM.xv, 1)
-        if j == 1
-            invM.xv[i, j] = inv(2iΔx^2 * (ηv(i-1, j) + ηv(i, j))
-                               + iΔy^2 * (ηc(i-1, j))
-                               + 2γ * iΔx^2)
-        end
-        if j == size(invM.xv, 2)
-            invM.xv[i, j] = inv(2iΔx^2 * (ηv(i-1, j) + ηv(i, j))
-                               + iΔy^2 * (ηc(i-1, j-1))
-                               + 2γ * iΔx^2)
-        end
-    end
-    # y direction, vertices
-    if 1 < j < size(invM.yv, 2)
-        if i == 1
-            invM.yv[i, j] = inv(2iΔy^2 * (ηv(i, j-1) + ηv(i, j))
-                               + iΔx^2 * (ηc(i, j-1))
-                               + 2γ * iΔy^2)
-        end
-        if i == size(invM.yv, 1)
-            invM.yv[i, j] = inv(2iΔy^2 * (ηv(i  , j-1) + ηv(i, j))
-                               + iΔx^2 * (ηc(i-1, j-1))
-                               + 2γ * iΔy^2)
-        end
-    end
-
-    ## Dirichlet boundary points, leave zero
 end
 
 

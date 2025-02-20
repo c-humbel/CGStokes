@@ -26,7 +26,6 @@ function construct_jacobian_with_boundary(n=5, backend=CPU(), type=Float64 , see
     ϵ̇_bg = eps(type)
 
     P    = (c=KernelAbstractions.zeros(backend, type, nx, ny), v=KernelAbstractions.zeros(backend, type, nx+1, ny+1))
-    ρg   = deepcopy(P)
     B    = deepcopy(P)
     τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx, ny),
                yy=KernelAbstractions.zeros(backend, type, nx, ny),
@@ -44,6 +43,8 @@ function construct_jacobian_with_boundary(n=5, backend=CPU(), type=Float64 , see
     D    = deepcopy(V)  # basis vector for directional derivative
     R    = deepcopy(V)  # Residuals
     Q    = deepcopy(V)  # row of Jacobian of compute_R wrt. V
+    ρg   = deepcopy(V)
+
 
     fill!.(values(B), 1)
 
@@ -94,7 +95,7 @@ function construct_jacobian(; n=5, backend=CPU(), type=Float64, seed=1234)
     ϵ̇_bg = eps(type)
 
     P    = (c=KernelAbstractions.zeros(backend, type, nx, ny), v=KernelAbstractions.zeros(backend, type, nx+1, ny+1))
-    ρg   = deepcopy(P)
+
     B    = deepcopy(P)
     τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx, ny),
                yy=KernelAbstractions.zeros(backend, type, nx, ny),
@@ -112,6 +113,7 @@ function construct_jacobian(; n=5, backend=CPU(), type=Float64, seed=1234)
     D    = deepcopy(V)  # basis vector for directional derivative
     R    = deepcopy(V)  # Residuals
     Q    = deepcopy(V)  # row of Jacobian of compute_R wrt. V
+    ρg   = deepcopy(V)
 
     fill!.(values(B), 1)
 
@@ -178,7 +180,7 @@ function construct_preconditioner_matrix(n=5, backend=CPU(), type=Float64, seed=
     end
 
     compute_strain_rate!(backend, 64, (n+1, n+1))(ϵ̇_E, V, n, n, ϵ̇_bg)
-    initialise_invM(backend, 64, (n+2, n+2))(invM, ϵ̇_E, B, q, n, n, γ)
+    initialise_invM(backend, 64, (n+2, n+2))(invM, V, ϵ̇_E, B, q, n, n, γ)
 
     N_c = (n+1) * n
     N_v = (n+2) * (n+1)
