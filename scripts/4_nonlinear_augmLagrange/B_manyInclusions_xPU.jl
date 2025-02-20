@@ -3,6 +3,7 @@ using ColorSchemes
 using Enzyme
 using KernelAbstractions
 using Random
+using CUDA
 
 include("../../src/tuple_manip.jl")
 include("kernels_free_slip.jl")
@@ -352,5 +353,5 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 end
 
 
-#nonlinear_inclusion(n=128, ninc=3, η_ratio=5.,γ_factor=100., niter=100000, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4, verbose=true);
+nonlinear_inclusion(n=128, ninc=5, η_ratio=10.,γ_factor=100., niter=100000, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4, verbose=true, backend=CUDABackend());
 
