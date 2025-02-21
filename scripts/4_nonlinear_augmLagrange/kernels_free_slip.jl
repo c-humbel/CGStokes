@@ -95,7 +95,7 @@ end
 
 
 # dimensions for kernel launch: nx+2, ny+2
-@kernel inbounds=true function compute_R!(R, P, τ, ρg, iΔx, iΔy)
+@kernel inbounds=true function compute_R!(R, P, τ, f, iΔx, iΔy)
     i, j = @index(Global, NTuple)
 
     # TODO: change ρg → f and make it a "velocity type" variable
@@ -110,7 +110,8 @@ end
         # residual in x direction on the interface
         R.xc[i, j] = -( (τ.c.xx[i, j  ] - τ.c.xx[i-1, j]) * iΔx
                      + (τ.v.xy[i, j+1] - τ.v.xy[i  , j]) * iΔy
-                     - (P.c[i, j] - P.c[i-1, j]) * iΔx)
+                     - (P.c[i, j] - P.c[i-1, j]) * iΔx
+                     - f.xc[i, j])
     end
     ## for velocities associated with cell corners (V.xv)
     if 1 < i < size(R.xv, 1) && j <= size(R.xv, 2)
@@ -122,7 +123,8 @@ end
 
         R.xv[i, j] = -( (τ.v.xx[i, j] - τ.v.xx[i-1, j]) * iΔx
                      + (τxy_t - τxy_b) * iΔy
-                     - (P.v[i, j] - P.v[i-1, j]) * iΔx)
+                     - (P.v[i, j] - P.v[i-1, j]) * iΔx
+                     - f.xv[i, j])
     end
 
     ### residual in vertical (y) direction
@@ -134,7 +136,7 @@ end
         R.yc[i, j] = -( (τ.c.yy[i  , j] - τ.c.yy[i, j-1]) * iΔy
                      + (τ.v.xy[i+1, j] - τ.v.xy[i, j  ]) * iΔx
                      - ( P.c[i, j] -  P.c[i, j-1]) * iΔy
-                     - (ρg.c[i, j] + ρg.c[i, j-1]) * 0.5)
+                     - f.yc[i, j])
     end
     ## for velocities associated with cell corners (V.yv)
     if i <= size(R.yv, 1) && 1 < j < size(R.yv, 2)
@@ -144,7 +146,7 @@ end
         R.yv[i, j] = -( (τ.v.yy[i, j] - τ.v.yy[i, j-1]) * iΔy
                      + (τxy_r - τxy_l) * iΔx
                      - ( P.v[i, j] -  P.v[i, j-1]) * iΔy
-                     - (ρg.v[i, j] + ρg.v[i, j-1]) * 0.5)
+                     - f.yv[i, j])
     end
 
     # Residuals corresponding to cells affected by Dirichlet BC are left zero
@@ -318,5 +320,17 @@ end
         end
 
         ϵ̇_E.v[i, j] = (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2)
+    end
+end
+
+
+#dimensions for kernel launch: maximum(size.(values(a), 1)), maximum(size.(values(a), 2))
+@kernel inbounds=true function set_sum!(a::NamedTuple, b::NamedTuple, c::NamedTuple, α::Real=1)
+    i, j = @index(Global, NTuple)
+
+    for k = keys(a)
+        if i <= size(a[k], 1) && j <=size(a[k], 2) 
+            a[k][i, j] = b[k][i, j] + α * c[k][i, j]
+        end
     end
 end
