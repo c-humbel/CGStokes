@@ -354,3 +354,15 @@ end
         ϵ̇_E.v[i, j] = (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2)
     end
 end
+
+
+#dimensions for kernel launch: maximum(size.(values(a), 1)), maximum(size.(values(a), 2))
+@kernel inbounds=true function set_sum!(a::NamedTuple, b::NamedTuple, c::NamedTuple, α::Real=1)
+    i, j = @index(Global, NTuple)
+
+    for k = keys(a)
+        if i <= size(a[k], 1) && j <=size(a[k], 2) 
+            a[k][i, j] = b[k][i, j] + α * c[k][i, j]
+        end
+    end
+end

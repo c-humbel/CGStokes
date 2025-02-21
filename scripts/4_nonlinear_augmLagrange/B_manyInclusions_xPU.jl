@@ -76,12 +76,11 @@ function initialise_B_f!(B, f, η_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly
 
     # set viscosity and body force values
     η_loc  = (c=Array(B.c), v=Array(B.v))
+    # set viscosity and body force values
+    η_loc  = (c=Array(B.c), v=Array(B.v))
     ρg_loc = (xc=Array(f.xc), yc=Array(f.yc), xv=Array(f.xv), yv=Array(f.yv))
-    η_loc.c  .= η_mat
-    η_loc.v  .= η_mat
-    for I = eachindex(ρg_loc)
-        ρg_loc[I] .= 0
-    end
+    tplFill!(η_loc, η_mat)
+    tplFill!(ρg_loc, 0.)
 
     for j = eachindex(yc)
         for i = eachindex(xc)
@@ -180,6 +179,8 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     Q    = deepcopy(V)  # Jacobian of compute_R wrt. V, multiplied by some vector (used for autodiff)
     f    = deepcopy(V)  # body force
     invM = deepcopy(V)  # preconditioner, cells correspoinding to Dirichlet BC are zero
+    f    = deepcopy(V)  # body force
+
 
     
     initialise_B_f!(B, f, B_avg, ρg_avg, η_ratio, xc, yc, xv, yv, Lx, Ly; ninc=ninc)
@@ -227,19 +228,21 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     up_D!      = update_D!(backend, workgroup, (nx+2, ny+2))
     up_V!      = update_V!(backend, workgroup, (nx+2, ny+2))
     comp_divV! = compute_divV!(backend, workgroup, (nx+1, ny+1))
-    comp_P_τ   = compute_P_τ!(backend, workgroup, (nx+1, ny+1))
-    comp_R     = compute_R!(backend, workgroup, (nx+2, ny+2))
-    comp_ϵ̇_E   = compute_strain_rate!(backend, workgroup, (nx+1, ny+1))
+    comp_P_τ!  = compute_P_τ!(backend, workgroup, (nx+1, ny+1))
+    comp_R!    = compute_R!(backend, workgroup, (nx+2, ny+2))
+    comp_ϵ̇_E!  = compute_strain_rate!(backend, workgroup, (nx+1, ny+1))
+    comp_K!    = set_sum!(backend, workgroup, (nx+2, ny+2))
+    step_V!    = set_sum!(backend, workgroup, (nx+2, ny+2))
 
     # create function for jacobian-vector product
     
     # compute Dv r * V̄ as Dp r * Dv p * V̄ + Dτ r * Dv τ * V̄
     function jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-        autodiff(Forward, comp_P_τ, DuplicatedNoNeed(P, P̄), DuplicatedNoNeed(τ, τ̄),
+        autodiff(Forward, comp_P_τ!, DuplicatedNoNeed(P, P̄), DuplicatedNoNeed(τ, τ̄),
                  Const(P₀), Duplicated(V, V̄), Const(B),
                  Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
 
-        autodiff(Forward, comp_R, DuplicatedNoNeed(R, Q),
+        autodiff(Forward, comp_R!, DuplicatedNoNeed(R, Q),
                  Duplicated(P, P̄), Duplicated(τ, τ̄), Const(ρg), Const(iΔx), Const(iΔy))
     
     end
@@ -252,8 +255,8 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
         tplSet!(P₀, P)
 
         # r = f - div τ + grad p - grad( div v)
-        comp_P_τ(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-        comp_R(R, P, τ, f, iΔx, iΔy)
+        comp_P_τ!(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+        comp_R!(R, P, τ, f, iΔx, iΔy)
 
         χ = tplNorm(R, Inf) / χ_ref
 
@@ -263,7 +266,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             δ_ref = tplNorm(f, Inf)
             # initialise preconditioner
             # ϵ̇_E = 0.5 * ϵ̇_ij * ϵ̇_ij
-            comp_ϵ̇_E(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
+            comp_ϵ̇_E!(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
             # M = diag (Dv r)
             init_invM!(invM, V, ϵ̇_E, B, q, iΔx, iΔy, γ)
 
@@ -274,8 +277,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             # use K instead of R as first argument because it might get overwritten in autodiff,
             # but it doesn't matter for K since we assign a new value anyway
             jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-            tplSet!(K, R)
-            tplSub!(K, Q)
+            comp_K!(K, R, Q, -1.)
 
             # d = inv(M) * k
             tplSet!(D, K, invM)
@@ -296,8 +298,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 # k = r - Dv r * dv
                 tplSet!(V̄, dV)
                 jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-                tplSet!(K, R)
-                tplSub!(K, Q)
+                comp_K!(K, R, Q, -1.)
 
                 # μ = k^T inv(M) k
                 μ_new = tplDot(K, K, invM)
@@ -316,33 +317,27 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 end
             end
             # damped to newton iteration
-            # find λ st. r(v + λ dv) < r(v)
-            tplSet!(V̄, V)
-            tplSub!(V̄, dV)
-
-            comp_P_τ(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-            comp_R(R, P, τ, f, iΔx, iΔy)
-
-            χ_new = tplNorm(R, Inf) / χ_ref
+            # find λ st. r(v - λ dv) < r(v)
             λ = 1.
+            step_V!(V̄, V, dV, -λ)
+            comp_P_τ!(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+            comp_R!(R, P, τ, f, iΔx, iΔy)
+            χ_new = tplNorm(R, Inf) / χ_ref
             while χ_new >= χ && λ > 1e-4
-                tplSet!(V̄, V)
-                tplScale!(dV, inv(MathConstants.golden))
-                tplSub!(V̄, dV)
-                comp_P_τ(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-                comp_R(R, P, τ, f, iΔx, iΔy)
                 λ /= MathConstants.golden
+                step_V!(V̄, V, dV, -λ)
+                comp_P_τ!(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+                comp_R!(R, P, τ, f, iΔx, iΔy)
                 χ_new = tplNorm(R, Inf) / χ_ref
             end
             tplSet!(V, V̄)
-            # λ *= MathConstants.golden
             χ = χ_new
  
             push!(itercounts, it)
             push!(res_newton, χ)
 
             # update plot -> works only for cpu backend
-            comp_ϵ̇_E(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
+            comp_ϵ̇_E!(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
             plt.Pc[3][] .= Array(P.c)
             plt.Vx[3][] .= Array(V.xc)
             plt.Vy[3][] .= Array(V.yc)
@@ -367,5 +362,5 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 end
 
 
-#nonlinear_inclusion(n=128, ninc=3, η_ratio=5.,γ_factor=100., niter=100000, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4, verbose=true);
+nonlinear_inclusion(n=128, ninc=3, η_ratio=5.,γ_factor=100., niter=100000, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4, verbose=true);
 
