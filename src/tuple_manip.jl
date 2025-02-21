@@ -34,6 +34,11 @@ function tplSet!(dest::NamedTuple, src::NamedTuple)
     return nothing
 end
 
+function tplFill!(dest::NamedTuple, value::Real)
+    fill!.(values(dest), value)
+    return nothing
+end
+
 
 function tplScale!(x::NamedTuple, a::Real)
     for k = keys(x)
