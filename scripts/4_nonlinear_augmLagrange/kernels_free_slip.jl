@@ -324,13 +324,43 @@ end
 end
 
 
-#dimensions for kernel launch: maximum(size.(values(a), 1)), maximum(size.(values(a), 2))
-@kernel inbounds=true function set_sum!(a::NamedTuple, b::NamedTuple, c::NamedTuple, α::Real=1)
+@kernel inbounds=true function compute_K!(K, R, Q)
     i, j = @index(Global, NTuple)
-
-    for k = keys(a)
-        if i <= size(a[k], 1) && j <=size(a[k], 2) 
-            a[k][i, j] = b[k][i, j] + α * c[k][i, j]
-        end
+    if i <= size(K.xc, 1) && j <= size(K.xc, 2)
+        K.xc[i, j] = R.xc[i, j] - Q.xc[i, j]
     end
+
+    if i <= size(K.yc, 1) && j <= size(K.yc, 2)
+        K.yc[i, j] = R.yc[i, j] - Q.yc[i, j]
+    end
+
+    if i <= size(K.xv, 1) && j <= size(K.xv, 2)
+        K.xv[i, j] = R.xv[i, j] - Q.xv[i, j]
+    end
+
+    if i <= size(K.yv, 1) && j <= size(K.yv, 2)
+        K.yv[i, j] = R.yv[i, j] - Q.yv[i, j]
+    end
+
+end
+
+
+@kernel inbounds=true function try_step_V!(V̄, V, dV, λ)
+    i, j = @index(Global, NTuple)
+    if i <= size(V̄.xc, 1) && j <= size(V̄.xc, 2)
+        V̄.xc[i, j] = V.xc[i, j] - λ * dV.xc[i, j]
+    end
+
+    if i <= size(V̄.yc, 1) && j <= size(V̄.yc, 2)
+        V̄.yc[i, j] = V.yc[i, j] - λ * dV.yc[i, j]
+    end
+
+    if i <= size(V̄.xv, 1) && j <= size(V̄.xv, 2)
+        V̄.xv[i, j] = V.xv[i, j] - λ * dV.xv[i, j]
+    end
+
+    if i <= size(V̄.yv, 1) && j <= size(V̄.yv, 2)
+        V̄.yv[i, j] = V.yv[i, j] - λ * dV.yv[i, j]
+    end
+
 end
