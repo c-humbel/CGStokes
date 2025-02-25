@@ -59,9 +59,12 @@ function measure_residual(n; backend=CPU(), workgroup=64, type=Float64)
     timings = [s.time for s in res.samples]
 
     # effective throughput (GB / s)
-    # Pressure and stress: 6 reads, 8 writes, ignoring BC
-    # Residual: 12 reads, 4 writes
-    A_eff = (14 + 16) * nx * ny * sizeof(type) / 1e9
+    # ideally, read:  B (2 arrays), V (4 arrays) P₀ (2 arrays), f (4 arrays)
+    #          write: R (4 arrays)
+    # currently:
+    #   Pressure and stress: 8 reads, 8 writes, ignoring BC
+    #   Residual: 12 reads, 4 writes
+    A_eff = (16) * nx * ny * sizeof(type) / 1e9
 
     return A_eff ./ (median(timings), quantile(timings, 0.05), quantile(timings, 0.95))
 
@@ -126,9 +129,9 @@ function measure_jvp(n; backend=CPU(), workgroup=64, type=Float64, seed=1234)
     timings = [s.time for s in res.samples]
 
     # effective throughput (GB / s)
-    # Pressure and stress: 6 reads, 8 writes, 12 duplicated, ignoring BC
-    # Residual: 12 reads, 4 writes, 12 duplicated
-    A_eff = (14 + 16 + 12 + 12) *nx * ny * sizeof(type) / 1e9
+    # ideally, read: V, V̄, write Q 
+    # what actually happens, no idea
+    A_eff = (12) *nx * ny * sizeof(type) / 1e9
 
     return A_eff ./ (median(timings), quantile(timings, 0.05), quantile(timings, 0.95))
 
