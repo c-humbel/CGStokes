@@ -2,6 +2,7 @@ using KernelAbstractions
 using Enzyme
 using Random
 using LinearAlgebra
+using CUDA
 
 include("../scripts/4_nonlinear_augmLagrange/kernels_free_slip.jl")
 
@@ -68,7 +69,7 @@ function construct_jacobian_with_boundary(n=5, backend=CPU(), type=Float64 , see
     for d = D
         for I = eachindex(d)
             # set one entry in search vector to 1
-            d[I] = 1.0
+            CUDA.@allowscalar d[I] = 1.0
             # compute the jacobian column by multiplying it with a "basis vector"
             jvp_R!(R, Q, P, dP, τ, dτ, V, D, P₀, f, B, q, ϵ̇_bg, nx, ny, γ, backend)
 
@@ -141,7 +142,7 @@ function construct_jacobian(; n=5, backend=CPU(), type=Float64, seed=1234)
                 if (i == 1 || i == size(D[k], 1)) && (k ∈ [:xc, :xv]) continue end
                 if (j == 1 || j == size(D[k], 2)) && (k ∈ [:yc, :yv]) continue end
                 # set one entry in search vector to 1
-                D[k][i, j] = 1.0
+                CUDA.@allowscalar D[k][i, j] = 1.0
                 # compute the jacobian column by multiplying it with a "basis vector"
                 jvp_R!(R, Q, P, dP, τ, dτ, V, D, P₀, f, B, q, ϵ̇_bg, nx, ny, γ, backend)
                 # store result in jacobian
