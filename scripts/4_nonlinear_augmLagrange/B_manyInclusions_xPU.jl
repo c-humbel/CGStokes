@@ -194,7 +194,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
     
     χ_ref = tplNorm(f, Inf) # is this correct ?
-    ω_ref = tplNorm(f, Inf) * Lx / tplNorm(B, Inf)
+    ω_ref = tplNorm(f, Inf) * Lx / tplNorm(B, Inf) # TODO: fix this, units of B do not match (not the same as viscosity) 
 
     # visualisation
     itercounts = []
