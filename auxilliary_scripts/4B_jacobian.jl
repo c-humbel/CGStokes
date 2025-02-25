@@ -18,6 +18,7 @@ function jvp_R!(R, dR, P, dP, τ, dτ, V, D, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔ
     KernelAbstractions.synchronize(bend)
 end
 
+
 function construct_jacobian_with_boundary(n=5, backend=CPU(), type=Float64 , seed=1234)
     rng = MersenneTwister(seed)
     nx, ny = n, n
@@ -26,7 +27,6 @@ function construct_jacobian_with_boundary(n=5, backend=CPU(), type=Float64 , see
     ϵ̇_bg = eps(type)
 
     P    = (c=KernelAbstractions.zeros(backend, type, nx, ny), v=KernelAbstractions.zeros(backend, type, nx+1, ny+1))
-    ρg   = deepcopy(P)
     B    = deepcopy(P)
     τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx, ny),
                yy=KernelAbstractions.zeros(backend, type, nx, ny),
@@ -44,6 +44,8 @@ function construct_jacobian_with_boundary(n=5, backend=CPU(), type=Float64 , see
     D    = deepcopy(V)  # basis vector for directional derivative
     R    = deepcopy(V)  # Residuals
     Q    = deepcopy(V)  # row of Jacobian of compute_R wrt. V
+    f    = deepcopy(V)
+
 
     fill!.(values(B), 1)
 
@@ -68,7 +70,7 @@ function construct_jacobian_with_boundary(n=5, backend=CPU(), type=Float64 , see
             # set one entry in search vector to 1
             d[I] = 1.0
             # compute the jacobian column by multiplying it with a "basis vector"
-            jvp_R!(R, Q, P, dP, τ, dτ, V, D, P₀, ρg, B, q, ϵ̇_bg, nx, ny, γ, backend)
+            jvp_R!(R, Q, P, dP, τ, dτ, V, D, P₀, f, B, q, ϵ̇_bg, nx, ny, γ, backend)
 
             # store result in jacobian
             J[1:E_xc, col]      .= reshape(Q.xc, N_xc)
@@ -94,7 +96,6 @@ function construct_jacobian(; n=5, backend=CPU(), type=Float64, seed=1234)
     ϵ̇_bg = eps(type)
 
     P    = (c=KernelAbstractions.zeros(backend, type, nx, ny), v=KernelAbstractions.zeros(backend, type, nx+1, ny+1))
-    ρg   = deepcopy(P)
     B    = deepcopy(P)
     τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx, ny),
                yy=KernelAbstractions.zeros(backend, type, nx, ny),
@@ -112,6 +113,8 @@ function construct_jacobian(; n=5, backend=CPU(), type=Float64, seed=1234)
     D    = deepcopy(V)  # basis vector for directional derivative
     R    = deepcopy(V)  # Residuals
     Q    = deepcopy(V)  # row of Jacobian of compute_R wrt. V
+    f    = deepcopy(V)
+
 
     fill!.(values(B), 1)
 
@@ -140,7 +143,7 @@ function construct_jacobian(; n=5, backend=CPU(), type=Float64, seed=1234)
                 # set one entry in search vector to 1
                 D[k][i, j] = 1.0
                 # compute the jacobian column by multiplying it with a "basis vector"
-                jvp_R!(R, Q, P, dP, τ, dτ, V, D, P₀, ρg, B, q, ϵ̇_bg, nx, ny, γ, backend)
+                jvp_R!(R, Q, P, dP, τ, dτ, V, D, P₀, f, B, q, ϵ̇_bg, nx, ny, γ, backend)
                 # store result in jacobian
                 J[1:E_xc, col]      .= reshape(Q.xc[2:end-1, :], N_xc)
                 J[E_xc+1:E_yc, col] .= reshape(Q.yc[:, 2:end-1], N_yc)
@@ -188,6 +191,100 @@ function construct_preconditioner_matrix(n=5, backend=CPU(), type=Float64, seed=
     return inv_m
 end
 
+@kernel function set_one_masked(array, even=true)
+    i, j = @index(Global, NTuple)
+
+    if (i+j) % 2 == 0
+        array[i, j] = even ? 1. : 0.
+    else
+        array[i, j] = even ? 0. : 1.
+    end
+end
+
+@kernel function set_masked(dest, src, even=true)
+    i, j = @index(Global, NTuple)
+
+    if (i+j) % 2 == 0 
+        if even
+            dest[i, j] = src[i, j]
+        end
+    elseif !even
+        dest[i, j] = src[i, j]
+    end
+end
+
+
+
+function compute_preconditioner_jvp(n=5, backend=CPU(), workgroup=64, type=Float64, seed=1234)
+    rng = MersenneTwister(seed)
+    nx, ny = n, n
+    Lx = Ly = 1
+    Δx,  Δy  = Lx / nx, Ly / ny
+    iΔx, iΔy = inv(Δx), inv(Δy)
+    γ    = 5.0
+    q    = 1.33
+    ϵ̇_bg = eps()
+
+    P    = (c=KernelAbstractions.zeros(backend, type, nx, ny), v=KernelAbstractions.zeros(backend, type, nx+1, ny+1))
+    B    = deepcopy(P)
+    τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx, ny),
+               yy=KernelAbstractions.zeros(backend, type, nx, ny),
+               xy=KernelAbstractions.zeros(backend, type, nx, ny)),
+            v=(xx=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
+               yy=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
+               xy=KernelAbstractions.zeros(backend, type, nx+1, ny+1)))
+    dτ   = deepcopy(τ)
+    P₀   = deepcopy(P)  # old pressure
+    dP   = deepcopy(P)  # memory needed for auto-differentiation
+    V    = (xc=KernelAbstractions.zeros(backend, type, nx+1, ny  ),
+            yc=KernelAbstractions.zeros(backend, type, nx  , ny+1),
+            xv=KernelAbstractions.zeros(backend, type, nx+2, ny+1),
+            yv=KernelAbstractions.zeros(backend, type, nx+1, ny+2))
+    D    = deepcopy(V)  # directions for derivative
+    R    = deepcopy(V)  # Residuals
+    Q    = deepcopy(V)  # row of Jacobian of compute_R wrt. V
+    f    = deepcopy(V)
+    M    = deepcopy(V)
+
+    set_one! = set_one_masked(backend, workgroup)
+    set!     = set_masked(backend, workgroup)
+
+    comp_P_tau = compute_P_τ!(backend, workgroup, (nx+1, ny+1))
+    comp_R = compute_R!(backend, workgroup, (nx+2, ny+2))
+
+    function jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+        autodiff(Forward, comp_P_tau, DuplicatedNoNeed(P, P̄), DuplicatedNoNeed(τ, τ̄),
+                 Const(P₀), Duplicated(V, V̄), Const(B),
+                 Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
+
+        autodiff(Forward, comp_R, DuplicatedNoNeed(R, Q),
+                 Duplicated(P, P̄), Duplicated(τ, τ̄), Const(ρg), Const(iΔx), Const(iΔy))
+    
+    end
+
+    fill!.(values(B), 1)
+
+    for a = V
+        copyto!(a, rand(rng, size(a)...))
+    end
+
+    for k = eachindex(D)
+        set_one!(D[k], true, ndrange=size(D[k]))
+        jvp_R(R, Q, P, dP, τ, dτ, V, D, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy , γ)
+        set!(M[k], Q[k], true, ndrange=size(D[k]))
+
+        set_one!(D[k], false, ndrange=size(D[k]))
+        jvp_R(R, Q, P, dP, τ, dτ, V, D, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy , γ)
+        set!(M[k], Q[k], false, ndrange=size(D[k]))
+
+    end
+
+    m = cat(reshape(M.xc, length(M.xc)), reshape(M.yc, length(M.yc)), reshape(M.xv, length(M.xv)), reshape(M.yv, length(M.yv)) ;dims=1)
+
+    return M, m
+       
+end
+
 # check that Jacobian is (almost) symmetric
 Jin = construct_jacobian();
 
@@ -200,10 +297,8 @@ Jin = construct_jacobian();
 
 # compare Jacobian and preconditioner
 J = construct_jacobian_with_boundary();
-m = construct_preconditioner_matrix();
+M, m = compute_preconditioner_jvp(5);
 
-m_ex = zeros(size(m));
 diagJ = diag(J);
-m_ex[diagJ .!= 0] = inv.(diagJ[diagJ .!= 0]);
 
-m_ex .- m
+diagJ .- m
