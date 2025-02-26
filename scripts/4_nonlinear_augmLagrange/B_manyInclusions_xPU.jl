@@ -40,9 +40,9 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     divV = deepcopy(P)  # velocity divergence
     B    = deepcopy(P)  # prefactor of constituitive relation
     ϵ̇_E  = deepcopy(P)  # invariant of strain rate
-    τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx, ny),
-               yy=KernelAbstractions.zeros(backend, type, nx, ny),
-               xy=KernelAbstractions.zeros(backend, type, nx, ny)),
+    τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx+2, ny+2),
+               yy=KernelAbstractions.zeros(backend, type, nx+2, ny+2),
+               xy=KernelAbstractions.zeros(backend, type, nx+2, ny+2)),
             v=(xx=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
                yy=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
                xy=KernelAbstractions.zeros(backend, type, nx+1, ny+1)))  # deviatoric stress tensor
@@ -241,5 +241,5 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 end
 
 
-nonlinear_inclusion(n=128, ninc=3, η_ratio=5.,γ_factor=100., niter=100000, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4, verbose=true);
+nonlinear_inclusion(n=126, ninc=3, η_ratio=5.,γ_factor=100., niter=100000, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4, verbose=true);
 

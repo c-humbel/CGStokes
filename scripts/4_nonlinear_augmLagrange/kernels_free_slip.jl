@@ -21,21 +21,33 @@ end
     i, j = @index(Global, NTuple)
     if i <= size(P.c, 1) && j <= size(P.c, 2)
 
-        # Dirichlet BC
+        # BC
         if i == 1
             V.xc[i, j] = 0.
+            τ.c.xx[i, j+1] = 0.
+            τ.c.yy[i, j+1] = 0.
+            τ.c.xy[i, j+1] = 0.
         end
 
         if i + 1 == size(V.xc, 1)
             V.xc[i+1, j] = 0.
+            τ.c.xx[i+2, j+1] = 0.
+            τ.c.yy[i+2, j+1] = 0.
+            τ.c.xy[i+2, j+1] = 0.
         end
 
         if j == 1
             V.yc[i, j] = 0.
+            τ.c.xx[i+1, j] = 0.
+            τ.c.yy[i+1, j] = 0.
+            τ.c.xy[i+1, j] = 0.
         end
 
         if j + 1 == size(V.yc, 2)
             V.yc[i, j+1] = 0.
+            τ.c.xx[i+1, j+2] = 0.
+            τ.c.yy[i+1, j+2] = 0.
+            τ.c.xy[i+1, j+2] = 0.
         end
 
         # Pressure update
@@ -43,19 +55,18 @@ end
         dVydy = (V.yc[i, j+1] - V.yc[i, j]) * iΔy
 
         P.c[i, j] = P₀.c[i, j] - γ * (dVxdx + dVydy)
-
-        # Neumann BC
-        if 1 < i < size(P.c, 1) && 1 < j < size(P.c, 2)
-            dVxdy_dVydx = 0.5 * ((V.xv[i+1, j+1] - V.xv[i+1, j]) * iΔy + (V.yv[i+1, j+1] - V.yv[i, j+1]) * iΔx)
-        else
-            dVxdy_dVydx = 0.
-        end
         
         # Stress update
+        dVxdy_dVydx = 0.5 * ((V.xv[i+1, j+1] - V.xv[i+1, j]) * iΔy + (V.yv[i+1, j+1] - V.yv[i, j+1]) * iΔx)
+        
+        
+        # Stress update
+
+        # Stress update
         η = 0.5 * B.c[i, j] * ((0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2) ^ (0.5q - 1) +  ϵ̇_bg)
-        τ.c.xx[i, j] = 2 * η * dVxdx
-        τ.c.yy[i, j] = 2 * η * dVydy
-        τ.c.xy[i, j] = 2 * η * dVxdy_dVydx
+        τ.c.xx[i+1, j+1] = 2 * η * dVxdx
+        τ.c.yy[i+1, j+1] = 2 * η * dVydy
+        τ.c.xy[i+1, j+1] = 2 * η * dVxdy_dVydx
     end
 
     if i <= size(P.v, 1) && j <= size(P.v, 2)
@@ -98,8 +109,6 @@ end
 @kernel inbounds=true function compute_R!(R, P, τ, f, iΔx, iΔy)
     i, j = @index(Global, NTuple)
 
-    # TODO: change ρg → f and make it a "velocity type" variable
-
     ### residual in horizontal (x) direction
     ## including Neumann BC on at top and bottom boundary
     ## for velocities associated with cell centers (V.xc)
@@ -108,7 +117,7 @@ end
         # inner values in x direction
 
         # residual in x direction on the interface
-        R.xc[i, j] = -( (τ.c.xx[i, j  ] - τ.c.xx[i-1, j]) * iΔx
+        R.xc[i, j] = -( (τ.c.xx[i+1, j+1] - τ.c.xx[i, j+1]) * iΔx
                      + (τ.v.xy[i, j+1] - τ.v.xy[i  , j]) * iΔy
                      - (P.c[i, j] - P.c[i-1, j]) * iΔx
                      - f.xc[i, j])
@@ -117,12 +126,8 @@ end
     if 1 < i < size(R.xv, 1) && j <= size(R.xv, 2)
         # all values in y direction
         # inner values in x direction
-
-        τxy_b = j > 1 ? τ.c.xy[i-1, j-1] : 0. # zero stress at the bottom boundary
-        τxy_t = j < size(R.xv, 2) ? τ.c.xy[i-1, j] : 0.  # zero stress at the top boundary
-
         R.xv[i, j] = -( (τ.v.xx[i, j] - τ.v.xx[i-1, j]) * iΔx
-                     + (τxy_t - τxy_b) * iΔy
+                     + (τ.c.xy[i, j+1] - τ.c.xy[i, j]) * iΔy
                      - (P.v[i, j] - P.v[i-1, j]) * iΔx
                      - f.xv[i, j])
     end
@@ -133,18 +138,15 @@ end
     if i <= size(R.yc, 1) && 1 < j < size(R.yc, 2)
         # inner values in y direction
         # all values in x direction        
-        R.yc[i, j] = -( (τ.c.yy[i  , j] - τ.c.yy[i, j-1]) * iΔy
+        R.yc[i, j] = -( (τ.c.yy[i+1, j+1] - τ.c.yy[i+1, j]) * iΔy
                      + (τ.v.xy[i+1, j] - τ.v.xy[i, j  ]) * iΔx
                      - ( P.c[i, j] -  P.c[i, j-1]) * iΔy
                      - f.yc[i, j])
     end
     ## for velocities associated with cell corners (V.yv)
     if i <= size(R.yv, 1) && 1 < j < size(R.yv, 2)
-        τxy_l = i > 1 ? τ.c.xy[i-1, j-1] : 0.
-        τxy_r = i < size(R.yv, 1) ? τ.c.xy[i, j-1] : 0.
-
         R.yv[i, j] = -( (τ.v.yy[i, j] - τ.v.yy[i, j-1]) * iΔy
-                     + (τxy_r - τxy_l) * iΔx
+                     + ( τ.c.xy[i+1, j]  - τ.c.xy[i, j]) * iΔx
                      - ( P.v[i, j] -  P.v[i, j-1]) * iΔy
                      - f.yv[i, j])
     end
