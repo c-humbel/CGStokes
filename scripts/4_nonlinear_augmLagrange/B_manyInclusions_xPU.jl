@@ -23,7 +23,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
     Lx = Ly = L_ref
     nx = ny = n
-    ϵ̇_bg = eps(type)
+    ϵ̇_bg = eps()
 
     Δx,  Δy  = Lx / nx, Ly / ny
     iΔx, iΔy = inv(Δx), inv(Δy)
@@ -241,6 +241,6 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
      return it, P, V, R
 end
 
-n = 1023
-nonlinear_inclusion(n=n, ninc=5, η_ratio=2.,γ_factor=500., niter=300n, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3, verbose=true, backend=CUDABackend(), workgroup=(8, 32));
+n = 126
+nonlinear_inclusion(n=n, ninc=1, η_ratio=2.,γ_factor=500., niter=300n, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3, verbose=true);
 

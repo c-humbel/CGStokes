@@ -58,12 +58,8 @@ end
         
         # Stress update
         dVxdy_dVydx = 0.5 * ((V.xv[i+1, j+1] - V.xv[i+1, j]) * iΔy + (V.yv[i+1, j+1] - V.yv[i, j+1]) * iΔx)
-        
-        
-        # Stress update
 
-        # Stress update
-        η = 0.5 * B.c[i, j] * ((0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2) ^ (0.5q - 1) +  ϵ̇_bg)
+        η = 0.5 * B.c[i, j] * (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2)^(0.5q - 1)
         τ.c.xx[i+1, j+1] = 2 * η * dVxdx
         τ.c.yy[i+1, j+1] = 2 * η * dVydy
         τ.c.xy[i+1, j+1] = 2 * η * dVxdy_dVydx
@@ -97,7 +93,7 @@ end
             dVxdy_dVydx = 0.
         end
 
-        η = 0.5 * B.v[i, j] * ((0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2) ^ (0.5q - 1) + ϵ̇_bg)
+        η = 0.5 * B.v[i, j] * ((0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2) ^ (0.5q - 1))
         τ.v.xx[i, j] = 2 * η * dVxdx
         τ.v.yy[i, j] = 2 * η * dVydy
         τ.v.xy[i, j] = 2 * η * dVxdy_dVydx
@@ -198,11 +194,11 @@ end
 
 
 # dimensions for kernel launch: nx+2, ny+2
-@kernel inbounds=true function initialise_invM(invM, ϵ̇_E, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+@kernel inbounds=true function initialise_invM(invM, ϵ̇_E, B, q, iΔx, iΔy, γ)
     i, j = @index(Global, NTuple)
 
-    ηc(i, j) = 0.5*B.c[i, j] * (ϵ̇_E.c[i, j] ^ (0.5q - 1) + ϵ̇_bg)
-    ηv(i, j) = 0.5*B.v[i, j] * (ϵ̇_E.v[i, j] ^ (0.5q - 1) + ϵ̇_bg)
+    ηc(i, j) = 0.5*B.c[i, j] * (ϵ̇_E.c[i, j] ^ (0.5q - 1))
+    ηv(i, j) = 0.5*B.v[i, j] * (ϵ̇_E.v[i, j] ^ (0.5q - 1))
     ## inner points
     # x direction, cell centers
     if 1 < i < size(invM.xc, 1) && 1 < j < size(invM.xc, 2)
@@ -300,13 +296,7 @@ end
     if i <= size(ϵ̇_E.c, 1) && j <= size(ϵ̇_E.c, 2)
         dVxdx = (V.xc[i+1, j] - V.xc[i, j]) * iΔx 
         dVydy = (V.yc[i, j+1] - V.yc[i, j]) * iΔy
-
-
-        if 1 < i < size(ϵ̇_E.c, 1) && 1 < j < size(ϵ̇_E.c, 2)
-            dVxdy_dVydx = 0.5 * ((V.xv[i+1, j+1] - V.xv[i+1, j]) * iΔy + (V.yv[i+1, j+1] - V.yv[i, j+1]) * iΔx)
-        else
-            dVxdy_dVydx = 0.
-        end
+        dVxdy_dVydx = 0.5 * ((V.xv[i+1, j+1] - V.xv[i+1, j]) * iΔy + (V.yv[i+1, j+1] - V.yv[i, j+1]) * iΔx)
         
         ϵ̇_E.c[i, j] = (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2)
     end
