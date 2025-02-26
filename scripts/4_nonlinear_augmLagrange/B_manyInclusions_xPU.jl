@@ -3,6 +3,7 @@ using ColorSchemes
 using Enzyme
 using KernelAbstractions
 using Random
+using CUDA
 
 include("../../src/tuple_manip.jl")
 include("kernels_free_slip.jl")
@@ -110,8 +111,8 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     comp_P_τ!  = compute_P_τ!(backend, workgroup, (nx+1, ny+1))
     comp_R!    = compute_R!(backend, workgroup, (nx+2, ny+2))
     comp_ϵ̇_E!  = compute_strain_rate!(backend, workgroup, (nx+1, ny+1))
-    comp_K!    = set_sum!(backend, workgroup, (nx+2, ny+2))
-    step_V!    = set_sum!(backend, workgroup, (nx+2, ny+2))
+    comp_K!    = compute_K!(backend, workgroup, (nx+2, ny+2))
+    step_V!    = try_step_V!(backend, workgroup, (nx+2, ny+2))
 
     # create function for jacobian-vector product
     
@@ -156,7 +157,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             # use K instead of R as first argument because it might get overwritten in autodiff,
             # but it doesn't matter for K since we assign a new value anyway
             jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-            comp_K!(K, R, Q, -1.)
+            comp_K!(K, R, Q)
 
             # d = inv(M) * k
             tplSet!(D, K, invM)
@@ -177,7 +178,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 # k = r - Dv r * dv
                 tplSet!(V̄, dV)
                 jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-                comp_K!(K, R, Q, -1.)
+                comp_K!(K, R, Q)
 
                 # μ = k^T inv(M) k
                 μ_new = tplDot(K, K, invM)
@@ -198,13 +199,13 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             # damped to newton iteration
             # find λ st. r(v - λ dv) < r(v)
             λ = 1.
-            step_V!(V̄, V, dV, -λ)
+            step_V!(V̄, V, dV, λ)
             comp_P_τ!(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             comp_R!(R, P, τ, f, iΔx, iΔy)
             χ_new = tplNorm(R, Inf) / χ_ref
             while χ_new >= χ && λ > 1e-4
                 λ /= MathConstants.golden
-                step_V!(V̄, V, dV, -λ)
+                step_V!(V̄, V, dV, λ)
                 comp_P_τ!(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                 comp_R!(R, P, τ, f, iΔx, iΔy)
                 χ_new = tplNorm(R, Inf) / χ_ref
@@ -240,6 +241,6 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
      return it, P, V, R
 end
 
-
-nonlinear_inclusion(n=126, ninc=3, η_ratio=5.,γ_factor=100., niter=100000, ϵ_ph=1e-4, ϵ_cg=1e-4, ϵ_newton=1e-4, verbose=true);
+n = 1023
+nonlinear_inclusion(n=n, ninc=5, η_ratio=2.,γ_factor=500., niter=300n, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3, verbose=true, backend=CUDABackend(), workgroup=(8, 32));
 
