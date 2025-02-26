@@ -333,7 +333,25 @@ end
     if i <= size(K.yv, 1) && j <= size(K.yv, 2)
         K.yv[i, j] = R.yv[i, j] - Q.yv[i, j]
     end
+end
 
+@kernel inbounds=true function update_K!(K, Q, α)
+    i, j = @index(Global, NTuple)
+    if i <= size(K.xc, 1) && j <= size(K.xc, 2)
+        K.xc[i, j] -= α * Q.xc[i, j]
+    end
+
+    if i <= size(K.yc, 1) && j <= size(K.yc, 2)
+        K.yc[i, j] -= α * Q.yc[i, j]
+    end
+
+    if i <= size(K.xv, 1) && j <= size(K.xv, 2)
+        K.xv[i, j] -= α * Q.xv[i, j]
+    end
+
+    if i <= size(K.yv, 1) && j <= size(K.yv, 2)
+        K.yv[i, j] -= α * Q.yv[i, j]
+    end
 end
 
 

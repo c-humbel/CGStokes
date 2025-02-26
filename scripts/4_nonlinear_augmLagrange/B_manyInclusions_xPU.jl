@@ -112,6 +112,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     comp_R!    = compute_R!(backend, workgroup, (nx+2, ny+2))
     comp_ϵ̇_E!  = compute_strain_rate!(backend, workgroup, (nx+1, ny+1))
     comp_K!    = compute_K!(backend, workgroup, (nx+2, ny+2))
+    up_K!      = update_K!(backend, workgroup, (nx+2, ny+2))
     step_V!    = try_step_V!(backend, workgroup, (nx+2, ny+2))
 
     # create function for jacobian-vector product
@@ -164,6 +165,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             μ = tplDot(K, D)
             δ = tplNorm(K, Inf) / δ_ref
             # start iteration
+            it_cg = 0
             while it <= niter && δ > ϵ_cg
                 # compute α
                 # α = k^T * inv(M) * k / (d^T * Dv r * d)
@@ -175,10 +177,16 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 up_V!(dV, D, α)
 
                 # recompute residual
-                # k = r - Dv r * dv
-                tplSet!(V̄, dV)
-                jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-                comp_K!(K, R, Q)
+                if it_cg % 50 == 0
+                    # k = r - Dv r * dv
+                    tplSet!(V̄, dV)
+                    jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+                    comp_K!(K, R, Q)
+                else
+                    # k = k - α Dv r * d
+                    up_K!(K, Q, α)
+                end
+
 
                 # μ = k^T inv(M) k
                 μ_new = tplDot(K, K, invM)
@@ -189,11 +197,11 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
                 # compute residual norm
                 δ = tplNorm(K, Inf) / δ_ref
+                it_cg += 1
                 it += 1
 
-                if verbose && it % 100 == 0
+                if verbose && it_cg % 100 == 0
                     println("CG residual = ", δ)
-
                 end
             end
             # damped to newton iteration
