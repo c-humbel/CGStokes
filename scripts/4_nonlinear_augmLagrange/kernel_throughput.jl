@@ -64,7 +64,7 @@ function measure_residual(n; backend=CPU(), workgroup=64, type=Float64)
     # currently:
     #   Pressure and stress: 8 reads, 8 writes, ignoring BC
     #   Residual: 12 reads, 4 writes
-    A_eff = (16) * nx * ny * sizeof(type) / 1e9
+    A_eff = (2*16) * nx * ny * sizeof(type) / 1e9
 
     return A_eff ./ (median(timings), quantile(timings, 0.05), quantile(timings, 0.95))
 
