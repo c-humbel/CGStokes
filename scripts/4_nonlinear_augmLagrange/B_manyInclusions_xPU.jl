@@ -10,7 +10,7 @@ include("kernels_free_slip.jl")
 include("init_many_inclusions.jl")
 
 
-function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_factor=1.,
+function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_factor=1.,
                             ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3,
                             backend=CPU(), workgroup=64, type=Float64, verbose=false)
     L_ref =  1. # reference length 
@@ -106,7 +106,7 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     # create Kernels
     init_invM! = initialise_invM(backend, workgroup, (nx+2, ny+2))
     up_D!      = update_D!(backend, workgroup, (nx+2, ny+2))
-    up_V!      = update_V!(backend, workgroup, (nx+2, ny+2))
+    up_dV!      = update_V!(backend, workgroup, (nx+2, ny+2))
     comp_divV! = compute_divV!(backend, workgroup, (nx+1, ny+1))
     comp_P_τ!  = compute_P_τ!(backend, workgroup, (nx+1, ny+1))
     comp_R!    = compute_R!(backend, workgroup, (nx+2, ny+2))
@@ -114,6 +114,8 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     comp_K!    = compute_K!(backend, workgroup, (nx+2, ny+2))
     up_K!      = update_K!(backend, workgroup, (nx+2, ny+2))
     step_V!    = try_step_V!(backend, workgroup, (nx+2, ny+2))
+    init_D!    = initialise_D!(backend, workgroup, (nx+2, ny+2))
+    set!       = assign_flux_field!(backend, workgroup, (nx+2, ny+2))
 
     # create function for jacobian-vector product
     
@@ -154,32 +156,32 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             # iteration zero
             # compute residual for CG,
             # k = r - Dv r * dv
-            tplSet!(V̄, dV)
+            set!(V̄, dV)
             # use K instead of R as first argument because it might get overwritten in autodiff,
             # but it doesn't matter for K since we assign a new value anyway
             jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             comp_K!(K, R, Q)
 
             # d = inv(M) * k
-            tplSet!(D, K, invM)
+            init_D!(D, K, invM)
             μ = tplDot(K, D)
             δ = tplNorm(K, Inf) / δ_ref
             # start iteration
-            it_cg = 0
+            it_cg = 1
             while it <= niter && δ > ϵ_cg
                 # compute α
                 # α = k^T * inv(M) * k / (d^T * Dv r * d)
-                tplSet!(V̄, D)
+                set!(V̄, D)
                 jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                 α = μ / tplDot(D, Q)
 
                 # dv += α d
-                up_V!(dV, D, α)
+                up_dV!(dV, D, α)
 
                 # recompute residual
-                if it_cg % 50 == 0
+                if it_cg % 10 == 0
                     # k = r - Dv r * dv
-                    tplSet!(V̄, dV)
+                    set!(V̄, dV)
                     jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                     comp_K!(K, R, Q)
                 else
@@ -200,8 +202,15 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 it_cg += 1
                 it += 1
 
-                if verbose && it_cg % 100 == 0
+                if verbose && it_cg % n == 0
                     println("CG residual = ", δ)
+                    plt.Pc[3][] .= Array(P.c)
+                    plt.Vx[3][] .= Array(K.xc)
+                    plt.Vy[3][] .= Array(K.yc)
+                    plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
+                    plt.Vx.colorrange[] = (min(-1e-10,minimum(K.xc)), max(1e-10,maximum(K.xc)))
+                    plt.Vy.colorrange[] = (min(-1e-10,minimum(K.yc)), max(1e-10,maximum(K.yc)))
+                    display(fig)
                 end
             end
             # damped to newton iteration
@@ -250,5 +259,5 @@ function nonlinear_inclusion(;n=127, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 end
 
 n = 126
-nonlinear_inclusion(n=n, ninc=1, η_ratio=2.,γ_factor=500., niter=300n, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3, verbose=true);
+nonlinear_inclusion(n=n, ninc=3, η_ratio=5.,γ_factor=500., niter=300n, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3, verbose=true);
 

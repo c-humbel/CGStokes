@@ -337,19 +337,19 @@ end
 
 @kernel inbounds=true function update_K!(K, Q, α)
     i, j = @index(Global, NTuple)
-    if i <= size(K.xc, 1) && j <= size(K.xc, 2)
+    if 1 < i < size(K.xc, 1) && j <= size(K.xc, 2)
         K.xc[i, j] -= α * Q.xc[i, j]
     end
 
-    if i <= size(K.yc, 1) && j <= size(K.yc, 2)
+    if i <= size(K.yc, 1) && 1 < j < size(K.yc, 2)
         K.yc[i, j] -= α * Q.yc[i, j]
     end
 
-    if i <= size(K.xv, 1) && j <= size(K.xv, 2)
+    if 1 < i < size(K.xv, 1) && j <= size(K.xv, 2)
         K.xv[i, j] -= α * Q.xv[i, j]
     end
 
-    if i <= size(K.yv, 1) && j <= size(K.yv, 2)
+    if i <= size(K.yv, 1) && 1 < j < size(K.yv, 2)
         K.yv[i, j] -= α * Q.yv[i, j]
     end
 end
@@ -373,4 +373,45 @@ end
         V̄.yv[i, j] = V.yv[i, j] - λ * dV.yv[i, j]
     end
 
+end
+
+
+@kernel inbounds=true function initialise_D!(D, K, invM)
+    i, j = @index(Global, NTuple)
+    if i <= size(D.xc, 1) && j <= size(D.xc, 2)
+        D.xc[i, j] = invM.xc[i, j] * K.xc[i, j]
+    end
+
+    if i <= size(D.yc, 1) && j <= size(D.yc, 2)
+        D.yc[i, j] = invM.yc[i, j] * K.yc[i, j]
+    end
+
+    if i <= size(D.xv, 1) && j <= size(D.xv, 2)
+        D.xv[i, j] = invM.xv[i, j] * K.xv[i, j]
+    end
+
+    if i <= size(D.yv, 1) && j <= size(D.yv, 2)
+        D.yv[i, j] = invM.yv[i, j] * K.yv[i, j]
+    end
+end
+
+
+@kernel inbounds=true function assign_flux_field!(this, other)
+    i, j = @index(Global, NTuple)
+    if i <= size(this.xc, 1) && j <= size(this.xc, 2)
+        this.xc[i, j] = other.xc[i, j]
+    end
+
+    if i <= size(this.yc, 1) && j <= size(this.yc, 2)
+        this.yc[i, j] = other.yc[i, j]
+    end
+
+    if i <= size(this.xv, 1) && j <= size(this.xv, 2)
+        this.xv[i, j] = other.xv[i, j]
+    end
+
+    if i <= size(this.yv, 1) && j <= size(this.yv, 2)
+        this.yv[i, j] = other.yv[i, j]
+    end
+    
 end
