@@ -161,6 +161,7 @@ function construct_jacobian(; n=5, backend=CPU(), type=Float64, seed=1234)
     return Array(J)
 end
 
+
 function construct_preconditioner_matrix(n=5, backend=CPU(), type=Float64, seed=1234)
     rng  = MersenneTwister(seed)
     γ    = 5.0
@@ -192,29 +193,6 @@ function construct_preconditioner_matrix(n=5, backend=CPU(), type=Float64, seed=
     return inv_m
 end
 
-@kernel function set_one_masked(array, even=true)
-    i, j = @index(Global, NTuple)
-
-    if (i+j) % 2 == 0
-        array[i, j] = even ? 1. : 0.
-    else
-        array[i, j] = even ? 0. : 1.
-    end
-end
-
-@kernel function set_masked(dest, src, even=true)
-    i, j = @index(Global, NTuple)
-
-    if (i+j) % 2 == 0 
-        if even
-            dest[i, j] = src[i, j]
-        end
-    elseif !even
-        dest[i, j] = src[i, j]
-    end
-end
-
-
 
 function compute_preconditioner_jvp(n=5, backend=CPU(), workgroup=64, type=Float64, seed=1234)
     rng = MersenneTwister(seed)
@@ -228,40 +206,28 @@ function compute_preconditioner_jvp(n=5, backend=CPU(), workgroup=64, type=Float
 
     P    = (c=KernelAbstractions.zeros(backend, type, nx, ny), v=KernelAbstractions.zeros(backend, type, nx+1, ny+1))
     B    = deepcopy(P)
-    τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx, ny),
-               yy=KernelAbstractions.zeros(backend, type, nx, ny),
-               xy=KernelAbstractions.zeros(backend, type, nx, ny)),
+    τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx+2, ny+2),
+               yy=KernelAbstractions.zeros(backend, type, nx+2, ny+2),
+               xy=KernelAbstractions.zeros(backend, type, nx+2, ny+2)),
             v=(xx=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
                yy=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
                xy=KernelAbstractions.zeros(backend, type, nx+1, ny+1)))
-    dτ   = deepcopy(τ)
+    τ̄   = deepcopy(τ)
     P₀   = deepcopy(P)  # old pressure
-    dP   = deepcopy(P)  # memory needed for auto-differentiation
+    P̄   = deepcopy(P)  # memory needed for auto-differentiation
     V    = (xc=KernelAbstractions.zeros(backend, type, nx+1, ny  ),
             yc=KernelAbstractions.zeros(backend, type, nx  , ny+1),
             xv=KernelAbstractions.zeros(backend, type, nx+2, ny+1),
             yv=KernelAbstractions.zeros(backend, type, nx+1, ny+2))
-    D    = deepcopy(V)  # directions for derivative
+    V̄    = deepcopy(V)  # directions for derivative
     R    = deepcopy(V)  # Residuals
     Q    = deepcopy(V)  # row of Jacobian of compute_R wrt. V
     f    = deepcopy(V)
-    M    = deepcopy(V)
+    invM = deepcopy(V)
 
-    set_one! = set_one_masked(backend, workgroup)
-    set!     = set_masked(backend, workgroup)
-
-    comp_P_tau = compute_P_τ!(backend, workgroup, (nx+1, ny+1))
-    comp_R = compute_R!(backend, workgroup, (nx+2, ny+2))
-
-    function jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, ρg, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-        autodiff(Forward, comp_P_tau, DuplicatedNoNeed(P, P̄), DuplicatedNoNeed(τ, τ̄),
-                 Const(P₀), Duplicated(V, V̄), Const(B),
-                 Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
-
-        autodiff(Forward, comp_R, DuplicatedNoNeed(R, Q),
-                 Duplicated(P, P̄), Duplicated(τ, τ̄), Const(ρg), Const(iΔx), Const(iΔy))
-    
-    end
+    set_one!   = set_part_to_ones!(backend, workgroup, (nx+2, ny+2))
+    set_part!  = assign_part!(backend, workgroup, (nx+2, ny+2))
+    inv!       = invert!(backend, workgroup, (nx+2, ny+2))
 
     fill!.(values(B), 1)
 
@@ -269,20 +235,21 @@ function compute_preconditioner_jvp(n=5, backend=CPU(), workgroup=64, type=Float
         copyto!(a, rand(rng, size(a)...))
     end
 
-    for k = eachindex(D)
-        set_one!(D[k], true, ndrange=size(D[k]))
-        jvp_R(R, Q, P, dP, τ, dτ, V, D, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy , γ)
-        set!(M[k], Q[k], true, ndrange=size(D[k]))
+    for I = eachindex(invM)
+        set_one!(V̄, true, I)
+        jvp_R!(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ, backend)
+        set_part!(invM[I], Q[I], true)
 
-        set_one!(D[k], false, ndrange=size(D[k]))
-        jvp_R(R, Q, P, dP, τ, dτ, V, D, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy , γ)
-        set!(M[k], Q[k], false, ndrange=size(D[k]))
-
+        set_one!(V̄, false, I)
+        jvp_R!(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ, backend)
+        set_part!(invM[I], Q[I], false)
+        @show V̄[I]
     end
+    inv!(invM)
 
-    m = cat(reshape(M.xc, length(M.xc)), reshape(M.yc, length(M.yc)), reshape(M.xv, length(M.xv)), reshape(M.yv, length(M.yv)) ;dims=1)
+    m = cat(reshape(invM.xc, length(invM.xc)), reshape(invM.yc, length(invM.yc)), reshape(invM.xv, length(invM.xv)), reshape(invM.yv, length(invM.yv)) ;dims=1)
 
-    return M, m
+    return m
        
 end
 
@@ -298,8 +265,11 @@ Jin = construct_jacobian();
 
 # compare Jacobian and preconditioner
 J = construct_jacobian_with_boundary();
-M, m = compute_preconditioner_jvp(5);
+m = compute_preconditioner_jvp(5);
 
 diagJ = diag(J);
 
-diagJ .- m
+m_ex = zeros(length(diagJ));
+m_ex[diagJ .> 0] .= 1 ./ diagJ[diagJ .> 0];
+
+@assert all(m .≈ m_ex)

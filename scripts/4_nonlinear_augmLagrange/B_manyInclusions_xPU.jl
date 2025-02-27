@@ -104,9 +104,8 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     display(fig)
 
     # create Kernels
-    init_invM! = initialise_invM(backend, workgroup, (nx+2, ny+2))
     up_D!      = update_D!(backend, workgroup, (nx+2, ny+2))
-    up_dV!      = update_V!(backend, workgroup, (nx+2, ny+2))
+    up_dV!     = update_V!(backend, workgroup, (nx+2, ny+2))
     comp_divV! = compute_divV!(backend, workgroup, (nx+1, ny+1))
     comp_P_τ!  = compute_P_τ!(backend, workgroup, (nx+1, ny+1))
     comp_R!    = compute_R!(backend, workgroup, (nx+2, ny+2))
@@ -116,6 +115,9 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     step_V!    = try_step_V!(backend, workgroup, (nx+2, ny+2))
     init_D!    = initialise_D!(backend, workgroup, (nx+2, ny+2))
     set!       = assign_flux_field!(backend, workgroup, (nx+2, ny+2))
+    set_one!   = set_part_to_ones!(backend, workgroup, (nx+2, ny+2))
+    set_part!  = assign_part!(backend, workgroup, (nx+2, ny+2))
+    inv!       = invert!(backend, workgroup, (nx+2, ny+2))
 
     # create function for jacobian-vector product
     
@@ -127,7 +129,23 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
         autodiff(Forward, comp_R!, DuplicatedNoNeed(R, Q),
                  Duplicated(P, P̄), Duplicated(τ, τ̄), Const(ρg), Const(iΔx), Const(iΔy))
-    
+        return nothing
+    end
+
+    # function to compute the preconditioner
+    # overwrites invM, P̄, τ̄, V̄, Q, potentially recomputes R, P, τ
+    function initialise_invM!(invM, R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+        for I = eachindex(invM)
+            set_one!(V̄, true, I)
+            jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+            set_part!(invM[I], Q[I], true)
+
+            set_one!(V̄, false, I)
+            jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+            set_part!(invM[I], Q[I], false)
+        end
+        inv!(invM)
+        return nothing
     end
 
 
@@ -148,10 +166,9 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             # reference 
             # δ_ref = tplNorm(f, Inf)
             # initialise preconditioner
-            # ϵ̇_E = 0.5 * ϵ̇_ij * ϵ̇_ij
-            comp_ϵ̇_E!(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
-            # M = diag (Dv r)
-            init_invM!(invM, ϵ̇_E, B, q, iΔx, iΔy, γ)
+            # inv(M) = inv(diag (Dv r))
+            initialise_invM!(invM, R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+        
 
             # iteration zero
             # compute residual for CG,

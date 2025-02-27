@@ -415,3 +415,64 @@ end
     end
     
 end
+
+
+@kernel inbounds=true function set_part_to_ones!(V̄, even, comp)
+    i, j = @index(Global, NTuple)
+    set_this = (even && (i+j) % 2 == 0) || (!even && (i+j) % 2 == 1)
+    if i <= size(V̄.xc, 1) && j <= size(V̄.xc, 2)
+        if comp == :xc
+            V̄.xc[i, j] = set_this ? 1. : 0.
+        else
+            V̄.xc[i, j] = 0.
+        end
+    end
+    if i <= size(V̄.yc, 1) && j <= size(V̄.yc, 2)
+        if comp == :yc
+            V̄.yc[i, j] = set_this ? 1. : 0.
+        else
+            V̄.yc[i, j] = 0.
+        end
+    end
+    if i <= size(V̄.xv, 1) && j <= size(V̄.xv, 2)
+        if comp == :xv
+            V̄.xv[i, j] = set_this ? 1. : 0.
+        else
+            V̄.xv[i, j] = 0.
+        end
+    end
+    if i <= size(V̄.yv, 1) && j <= size(V̄.yv, 2)
+       if comp == :yv
+            V̄.yv[i, j] = set_this ? 1. : 0.
+        else
+            V̄.yv[i, j] = 0.
+        end
+    end
+end
+
+
+@kernel inbounds=true function assign_part!(dest, src, even)
+    i, j = @index(Global, NTuple)
+    if i <= size(dest, 1) && j <= size(dest, 2)
+        if (even && (i+j) % 2 == 0) || (!even && (i+j) % 2 == 1)
+            dest[i, j] = src[i, j] 
+        end
+    end
+end
+
+
+@kernel inbounds=true function invert!(M)
+    i, j = @index(Global, NTuple)
+    if i <= size(M.xc, 1) && j <= size(M.xc, 2)
+        M.xc[i, j] = M.xc[i, j] != 0. ? inv(M.xc[i, j]) : 0.
+    end
+    if i <= size(M.yc, 1) && j <= size(M.yc, 2)
+        M.yc[i, j] = M.yc[i, j] != 0. ? inv(M.yc[i, j]) : 0.
+    end
+    if i <= size(M.xv, 1) && j <= size(M.xv, 2)
+        M.xv[i, j] = M.xv[i, j] != 0. ? inv(M.xv[i, j]) : 0.
+    end
+    if i <= size(M.yv, 1) && j <= size(M.yv, 2)
+        M.yv[i, j] = M.yv[i, j] != 0. ? inv(M.yv[i, j]) : 0.
+    end
+end
