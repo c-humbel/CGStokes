@@ -29,9 +29,9 @@ function construct_jacobian_with_boundary(n=5, backend=CPU(), type=Float64 , see
 
     P    = (c=KernelAbstractions.zeros(backend, type, nx, ny), v=KernelAbstractions.zeros(backend, type, nx+1, ny+1))
     B    = deepcopy(P)
-    τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx, ny),
-               yy=KernelAbstractions.zeros(backend, type, nx, ny),
-               xy=KernelAbstractions.zeros(backend, type, nx, ny)),
+    τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx+2, ny+2),
+               yy=KernelAbstractions.zeros(backend, type, nx+2, ny+2),
+               xy=KernelAbstractions.zeros(backend, type, nx+2, ny+2)),
             v=(xx=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
                yy=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
                xy=KernelAbstractions.zeros(backend, type, nx+1, ny+1)))
@@ -98,9 +98,9 @@ function construct_jacobian(; n=5, backend=CPU(), type=Float64, seed=1234)
 
     P    = (c=KernelAbstractions.zeros(backend, type, nx, ny), v=KernelAbstractions.zeros(backend, type, nx+1, ny+1))
     B    = deepcopy(P)
-    τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx, ny),
-               yy=KernelAbstractions.zeros(backend, type, nx, ny),
-               xy=KernelAbstractions.zeros(backend, type, nx, ny)),
+    τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx+2, ny+2),
+               yy=KernelAbstractions.zeros(backend, type, nx+2, ny+2),
+               xy=KernelAbstractions.zeros(backend, type, nx+2, ny+2)),
             v=(xx=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
                yy=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
                xy=KernelAbstractions.zeros(backend, type, nx+1, ny+1)))
