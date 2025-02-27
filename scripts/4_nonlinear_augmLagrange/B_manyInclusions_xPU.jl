@@ -146,7 +146,7 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
         # Newton iteration
         while it < niter && χ > ϵ_newton
             # reference 
-            δ_ref = tplNorm(f, Inf)
+            # δ_ref = tplNorm(f, Inf)
             # initialise preconditioner
             # ϵ̇_E = 0.5 * ϵ̇_ij * ϵ̇_ij
             comp_ϵ̇_E!(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
@@ -165,10 +165,11 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             # d = inv(M) * k
             init_D!(D, K, invM)
             μ = tplDot(K, D)
-            δ = tplNorm(K, Inf) / δ_ref
+            μ_ref = μ
+            # δ = tplNorm(K, Inf) / δ_ref
             # start iteration
             it_cg = 1
-            while it <= niter && δ > ϵ_cg
+            while it <= niter && μ > ϵ_cg^2 * μ_ref
                 # compute α
                 # α = k^T * inv(M) * k / (d^T * Dv r * d)
                 set!(V̄, D)
@@ -179,7 +180,7 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 up_dV!(dV, D, α)
 
                 # recompute residual
-                if it_cg % 10 == 0
+                if it_cg % 1 == 0
                     # k = r - Dv r * dv
                     set!(V̄, dV)
                     jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
@@ -198,12 +199,12 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 up_D!(D, K, invM, β)
 
                 # compute residual norm
-                δ = tplNorm(K, Inf) / δ_ref
+                # δ = tplNorm(K, Inf) / δ_ref
                 it_cg += 1
                 it += 1
 
                 if verbose && it_cg % n == 0
-                    println("CG residual = ", δ)
+                    println("CG residual = ", μ)
                     plt.Pc[3][] .= Array(P.c)
                     plt.Vx[3][] .= Array(K.xc)
                     plt.Vy[3][] .= Array(K.yc)
@@ -220,7 +221,7 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             comp_P_τ!(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             comp_R!(R, P, τ, f, iΔx, iΔy)
             χ_new = tplNorm(R, Inf) / χ_ref
-            while χ_new >= χ && λ > 1e-4
+            while χ_new >= χ && λ > 1e-2
                 λ /= MathConstants.golden
                 step_V!(V̄, V, dV, λ)
                 comp_P_τ!(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
@@ -259,5 +260,5 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 end
 
 n = 126
-nonlinear_inclusion(n=n, ninc=3, η_ratio=5.,γ_factor=500., niter=300n, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3, verbose=true);
+nonlinear_inclusion(n=n, ninc=3, η_ratio=5.,γ_factor=50., niter=500n, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3, verbose=false);
 
