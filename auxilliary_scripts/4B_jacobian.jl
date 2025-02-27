@@ -235,12 +235,12 @@ function compute_preconditioner_jvp(n=5, backend=CPU(), workgroup=64, type=Float
         copyto!(a, rand(rng, size(a)...))
     end
 
-    for I = eachindex(invM)
-        set_one!(V̄, true, I)
+    for (i, I) = enumerate(eachindex(invM))
+        set_one!(V̄, true, i)
         jvp_R!(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ, backend)
         set_part!(invM[I], Q[I], true)
 
-        set_one!(V̄, false, I)
+        set_one!(V̄, false, i)
         jvp_R!(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ, backend)
         set_part!(invM[I], Q[I], false)
         @show V̄[I]
