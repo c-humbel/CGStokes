@@ -135,12 +135,12 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     # function to compute the preconditioner
     # overwrites invM, P̄, τ̄, V̄, Q, potentially recomputes R, P, τ
     function initialise_invM!(invM, R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-        for I = eachindex(invM)
-            set_one!(V̄, true, I)
+        for (i, I) = enumerate(eachindex(invM))
+            set_one!(V̄, true, i)
             jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             set_part!(invM[I], Q[I], true)
 
-            set_one!(V̄, false, I)
+            set_one!(V̄, false, i)
             jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             set_part!(invM[I], Q[I], false)
         end
@@ -222,13 +222,13 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
                 if verbose && it_cg % n == 0
                     println("CG residual = ", μ)
-                    plt.Pc[3][] .= Array(P.c)
-                    plt.Vx[3][] .= Array(K.xc)
-                    plt.Vy[3][] .= Array(K.yc)
-                    plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
-                    plt.Vx.colorrange[] = (min(-1e-10,minimum(K.xc)), max(1e-10,maximum(K.xc)))
-                    plt.Vy.colorrange[] = (min(-1e-10,minimum(K.yc)), max(1e-10,maximum(K.yc)))
-                    display(fig)
+                    # plt.Pc[3][] .= Array(P.c)
+                    # plt.Vx[3][] .= Array(K.xc)
+                    # plt.Vy[3][] .= Array(K.yc)
+                    # plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
+                    # plt.Vx.colorrange[] = (min(-1e-10,minimum(K.xc)), max(1e-10,maximum(K.xc)))
+                    # plt.Vy.colorrange[] = (min(-1e-10,minimum(K.yc)), max(1e-10,maximum(K.yc)))
+                    # display(fig)
                 end
             end
             # damped to newton iteration
@@ -276,6 +276,6 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
      return it, P, V, R
 end
 
-n = 126
-nonlinear_inclusion(n=n, ninc=3, η_ratio=5.,γ_factor=50., niter=500n, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3, verbose=false);
+#n = 126
+#nonlinear_inclusion(n=n, ninc=3, η_ratio=5.,γ_factor=50., niter=500n, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3, verbose=false);
 
