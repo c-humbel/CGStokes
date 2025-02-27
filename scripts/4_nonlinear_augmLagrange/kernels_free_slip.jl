@@ -417,32 +417,33 @@ end
 end
 
 
-@kernel inbounds=true function set_part_to_ones!(V̄, even, comp)
+# relies on the ordering of the components in V to be xc, yc, xv, yv
+@kernel inbounds=true function set_part_to_ones!(V̄, even, comp_idx)
     i, j = @index(Global, NTuple)
     set_this = (even && (i+j) % 2 == 0) || (!even && (i+j) % 2 == 1)
     if i <= size(V̄.xc, 1) && j <= size(V̄.xc, 2)
-        if comp == :xc
+        if comp_idx == 1
             V̄.xc[i, j] = set_this ? 1. : 0.
         else
             V̄.xc[i, j] = 0.
         end
     end
     if i <= size(V̄.yc, 1) && j <= size(V̄.yc, 2)
-        if comp == :yc
+        if comp_idx == 2
             V̄.yc[i, j] = set_this ? 1. : 0.
         else
             V̄.yc[i, j] = 0.
         end
     end
     if i <= size(V̄.xv, 1) && j <= size(V̄.xv, 2)
-        if comp == :xv
+        if comp_idx == 3
             V̄.xv[i, j] = set_this ? 1. : 0.
         else
             V̄.xv[i, j] = 0.
         end
     end
     if i <= size(V̄.yv, 1) && j <= size(V̄.yv, 2)
-       if comp == :yv
+       if comp_idx == 4
             V̄.yv[i, j] = set_this ? 1. : 0.
         else
             V̄.yv[i, j] = 0.
