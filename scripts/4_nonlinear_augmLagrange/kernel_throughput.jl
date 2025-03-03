@@ -131,8 +131,8 @@ function measure_jvp(n; backend=CPU(), workgroup=64, type=Float64, seed=1234)
     # effective throughput (GB / s)
     # ideally, read: V, V̄, write Q 
     # what actually happens, no idea
-    A_eff = (12) *nx * ny * sizeof(type) / 1e9
+    # A_eff = (12) *nx * ny * sizeof(type) / 1e9
 
-    return A_eff ./ (median(timings), quantile(timings, 0.05), quantile(timings, 0.95))
+    return #= A_eff ./ =# (median(timings), quantile(timings, 0.05), quantile(timings, 0.95))
 
 end

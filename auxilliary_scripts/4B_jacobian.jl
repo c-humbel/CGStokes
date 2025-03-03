@@ -243,7 +243,6 @@ function compute_preconditioner_jvp(n=5, backend=CPU(), workgroup=64, type=Float
         set_one!(V̄, false, i)
         jvp_R!(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ, backend)
         set_part!(invM[I], Q[I], false)
-        @show V̄[I]
     end
     inv!(invM)
 

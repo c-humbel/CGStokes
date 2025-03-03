@@ -56,6 +56,7 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
     V̄    = deepcopy(V)  # memory needed for auto-differentiation
     D    = deepcopy(V)  # search direction of CG, cells affecting Dirichlet BC are zero
     R    = deepcopy(V)  # nonlinear Residual
+    R̄    = deepcopy(V)
     K    = deepcopy(V)  # Residuals in CG
     Q    = deepcopy(V)  # Jacobian of compute_R wrt. V, multiplied by some vector (used for autodiff)
     invM = deepcopy(V)  # preconditioner, cells correspoinding to Dirichlet BC are zero
@@ -174,9 +175,8 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             # compute residual for CG,
             # k = r - Dv r * dv
             set!(V̄, dV)
-            # use K instead of R as first argument because it might get overwritten in autodiff,
-            # but it doesn't matter for K since we assign a new value anyway
-            jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+            # use R̄ instead of R as first argument because it might get overwritten in autodiff
+            jvp_R(R̄, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             comp_K!(K, R, Q)
 
             # d = inv(M) * k
@@ -190,17 +190,17 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 # compute α
                 # α = k^T * inv(M) * k / (d^T * Dv r * d)
                 set!(V̄, D)
-                jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+                jvp_R(R̄, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                 α = μ / tplDot(D, Q)
 
                 # dv += α d
                 up_dV!(dV, D, α)
 
                 # recompute residual
-                if it_cg % 1 == 0
+                if it_cg % 1000 == 0
                     # k = r - Dv r * dv
                     set!(V̄, dV)
-                    jvp_R(K, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+                    jvp_R(R̄, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
                     comp_K!(K, R, Q)
                 else
                     # k = k - α Dv r * d
@@ -222,13 +222,13 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
                 if verbose && it_cg % n == 0
                     println("CG residual = ", μ)
-                    # plt.Pc[3][] .= Array(P.c)
-                    # plt.Vx[3][] .= Array(K.xc)
-                    # plt.Vy[3][] .= Array(K.yc)
-                    # plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
-                    # plt.Vx.colorrange[] = (min(-1e-10,minimum(K.xc)), max(1e-10,maximum(K.xc)))
-                    # plt.Vy.colorrange[] = (min(-1e-10,minimum(K.yc)), max(1e-10,maximum(K.yc)))
-                    # display(fig)
+                    plt.Pc[3][] .= Array(P.c)
+                    plt.Vx[3][] .= Array(K.xc)
+                    plt.Vy[3][] .= Array(K.yc)
+                    plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
+                    plt.Vx.colorrange[] = (min(-1e-10,minimum(K.xc)), max(1e-10,maximum(K.xc)))
+                    plt.Vy.colorrange[] = (min(-1e-10,minimum(K.yc)), max(1e-10,maximum(K.yc)))
+                    display(fig)
                 end
             end
             # damped to newton iteration
@@ -276,6 +276,6 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
      return it, P, V, R
 end
 
-#n = 126
-#nonlinear_inclusion(n=n, ninc=3, η_ratio=5.,γ_factor=50., niter=500n, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3, verbose=false);
+n = 126
+nonlinear_inclusion(n=n, ninc=3, η_ratio=5.,γ_factor=50., niter=500n, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3, verbose=true);
 
