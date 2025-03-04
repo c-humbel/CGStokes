@@ -48,6 +48,24 @@ end
     return
 end
 
+@views function preconditioner!(Z, R, η, dx, dy)
+    Z.vc.x .= R.vc.x ./ (η.c[1:end-1, :] + η.c[2:end, :] + η.v[2:end-1, 1:end-1] + η.v[2:end-1, 2:end])
+    Z.cv.y .= R.cv.y ./ (η.c[:, 1:end-1] + η.c[:, 2:end] + η.v[1:end-1, 2:end-1] + η.v[2:end, 2:end-1])
+
+    Z.cv.x[:, 2:end-1]  .= R.cv.x[:, 2:end-1] ./ (η.v[1:end-1, 2:end-1] + η.v[2:end, 2:end-1] + η.c[:, 1:end-1] + η.c[:, 2:end])
+    Z.cv.x[:, [1, end]] .= R.cv.x[:, [1, end]] ./ (η.v[1:end-1, [1, end]] + η.v[2:end, [1, end]])
+
+    Z.vc.y[2:end-1, :]  .= R.vc.y[2:end-1, :] ./ (η.v[2:end-1, 1:end-1] + η.v[2:end-1, 2:end] + η.c[1:end-1, :] + η.c[2:end, :])
+    Z.vc.y[[1, end], :] .= R.vc.y[[1, end], :] ./ (η.v[[1, end], 1:end-1] + η.v[[1, end], 2:end])
+
+    return
+end
+
+@views function line_search!()
+    # TODO
+    return
+end
+
 @views function main()
     # physics
     lx, ly = 1.0, 1.0
@@ -127,10 +145,15 @@ end
            Colorbar(fig[1, 2][1, 2], hms[3]))
     display(fig)
     # velocity solver
-    # init residual
     residual!(R, V, P, P_old, τ, A, η, ρg, γ, dx, dy)
+    preconditioner!(Z, R, η, dx, dy)
+    D.vc.x .= Z.vc.x
+    D.cv.y .= Z.cv.y
+    D.cv.x .= Z.cv.x
+    D.vc.y .= Z.vc.y
 
     for iter in 1:maxiter
+        # TODO
         break
     end
     return
