@@ -11,7 +11,7 @@ include("init_many_inclusions.jl")
 
 
 function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_factor=1.,
-                            ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3,
+                            ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, freq_recompute=100,
                             backend=CPU(), workgroup=64, type=Float64, verbose=false)
     L_ref =  1. # reference length 
     ρg_avg = 1. # average density
@@ -71,12 +71,12 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
 
     # residual norms for monitoring convergence
     δ = Inf # CG
+    μ = Inf # CG
     χ = Inf # Newton
     ω = Inf # Pressure
 
     
-    χ_ref = tplNorm(f, Inf) # is this correct ?
-    ω_ref = tplNorm(f, Inf) * Lx / tplNorm(B, Inf) # TODO: fix this, units of B do not match (not the same as viscosity) 
+    χ_ref = tplNorm(f) # is this correct ?
 
     # visualisation
     itercounts = []
@@ -160,15 +160,15 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
         comp_P_τ!(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
         comp_R!(R, P, τ, f, iΔx, iΔy)
 
-        χ = tplNorm(R, Inf) / χ_ref
+        χ = tplNorm(R) / χ_ref
 
         # Newton iteration
         while it < niter && χ > ϵ_newton
-            # reference 
-            # δ_ref = tplNorm(f, Inf)
             # initialise preconditioner
             # inv(M) = inv(diag (Dv r))
             initialise_invM!(invM, R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+            # reference for cg residual
+            μ_ref = tplDot(R, R, invM)
         
 
             # iteration zero
@@ -182,7 +182,6 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             # d = inv(M) * k
             init_D!(D, K, invM)
             μ = tplDot(K, D)
-            μ_ref = μ
             # δ = tplNorm(K, Inf) / δ_ref
             # start iteration
             it_cg = 1
@@ -197,7 +196,7 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 up_dV!(dV, D, α)
 
                 # recompute residual
-                if it_cg % 1000 == 0
+                if it_cg % freq_recompute == 0
                     # k = r - Dv r * dv
                     set!(V̄, dV)
                     jvp_R(R̄, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
@@ -215,20 +214,27 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
                 # d = β d + inv(M) * k 
                 up_D!(D, K, invM, β)
 
-                # compute residual norm
-                # δ = tplNorm(K, Inf) / δ_ref
                 it_cg += 1
                 it += 1
 
-                if verbose && it_cg % n == 0
-                    println("CG residual = ", μ)
-                    plt.Pc[3][] .= Array(P.c)
-                    plt.Vx[3][] .= Array(K.xc)
-                    plt.Vy[3][] .= Array(K.yc)
-                    plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
-                    plt.Vx.colorrange[] = (min(-1e-10,minimum(K.xc)), max(1e-10,maximum(K.xc)))
-                    plt.Vy.colorrange[] = (min(-1e-10,minimum(K.yc)), max(1e-10,maximum(K.yc)))
-                    display(fig)
+                if verbose && it_cg % 5n == 0
+                    println("CG residual = ", μ / μ_ref)
+                    # plt.Pc[3][] .= Array(P.c)
+                    # plt.Vx[3][] .= Array(K.xc)
+                    # plt.Vy[3][] .= Array(K.yc)
+                    # plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
+                    # plt.Vx.colorrange[] = (min(-1e-10,minimum(K.xc)), max(1e-10,maximum(K.xc)))
+                    # plt.Vy.colorrange[] = (min(-1e-10,minimum(K.yc)), max(1e-10,maximum(K.yc)))
+                    # display(fig)
+                end
+
+                # periodically check for stagnation
+                if it_cg % freq_recompute == 0
+                    δ = α * tplNorm(D) / tplNorm(dV) 
+                    if δ < ϵ_cg
+                        println("GC relative update: ", δ)
+                        break
+                    end
                 end
             end
             # damped to newton iteration
@@ -238,7 +244,7 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             comp_P_τ!(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             comp_R!(R, P, τ, f, iΔx, iΔy)
             χ_new = tplNorm(R, Inf) / χ_ref
-            while χ_new >= χ && λ > 1e-2
+            while χ_new >= χ && λ > 1e-3
                 λ /= MathConstants.golden
                 step_V!(V̄, V, dV, λ)
                 comp_P_τ!(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
@@ -269,13 +275,13 @@ function nonlinear_inclusion(;n=126, ninc=5, η_ratio=0.1, niter=10000, γ_facto
             println("Newton residual = ", χ, "; λ = ", λ, "; total iteration count: ", it)
          end    
          comp_divV!(divV, V, iΔx, iΔy)
-         ω = tplNorm(divV, Inf) / ω_ref
+         ω = tplNorm(divV) / tplNorm(P)
          println("Pressure residual = ", ω, ", Newton residual = ", χ, ", CG residual = ", δ)
      end
  
      return it, P, V, R
 end
 
-n = 126
-nonlinear_inclusion(n=n, ninc=3, η_ratio=5.,γ_factor=50., niter=500n, ϵ_ph=1e-3, ϵ_cg=1e-3, ϵ_newton=1e-3, verbose=true);
+n = 62
+nonlinear_inclusion(n=n, ninc=3, η_ratio=10.,γ_factor=100., niter=100000n, ϵ_ph=1e-6, ϵ_cg=1e-12, ϵ_newton=1e-9, freq_recompute=50, verbose=false);
 
