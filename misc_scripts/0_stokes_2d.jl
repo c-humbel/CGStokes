@@ -1,33 +1,87 @@
+# Step 0: linear Stokes solver in 2D with variationally consistent residual
 using CairoMakie, Enzyme, LinearAlgebra, Printf
 
-@views function J()
-    return
-end
-
-@views function residual!(R, V, P, P_old, τ, A, η, ρg, γ, dx, dy)
-    # compute effective viscosity
+@views function J(V, P, P_old, ∇V, τ, ε̇, A, η, ρg, γ, dx, dy)
     @. η.c[2:end-1, 2:end-1] = 0.5 * A.c^(-1)
-    @. η.c[[1, end], :] .= η.c[[2, end - 1], :]
-    @. η.c[:, [1, end]] .= η.c[:, [2, end - 1]]
+    @. η.c[[1, end], :] = η.c[[2, end - 1], :]
+    @. η.c[:, [1, end]] = η.c[:, [2, end - 1]]
     @. η.v = 0.5 * A.v^(-1)
 
-    # compute pressure
-    @. P.c = P_old.c - γ * ((V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx +
-                            (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy)
+    # compute velocity divergence
+    @. ∇V.c = (V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx +
+              (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
 
-    @. P.v = P_old.v - γ * ((V.cv.x[2:end, :] - V.cv.x[1:end-1, :]) / dx +
-                            (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy)
+    @. ∇V.v = (V.cv.x[2:end, :] - V.cv.x[1:end-1, :]) / dx +
+              (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy
+
+    # compute pressure
+    @. P.c = P_old.c - γ * ∇V.c
+    @. P.v = P_old.v - γ * ∇V.v
+
+    # compute deviatoric strain rates
+    @. ε̇.c.xx = (V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx
+    @. ε̇.c.yy = (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
+    @. ε̇.c.xy[2:end-1, 2:end-1] = 0.5 * ((V.cv.x[2:end-1, 2:end] - V.cv.x[2:end-1, 1:end-1]) / dy +
+                                          (V.vc.y[2:end, 2:end-1] - V.vc.y[1:end-1, 2:end-1]) / dx)
+
+    @. ε̇.v.xx = (V.cv.x[2:end, :] - V.cv.x[1:end-1, :]) / dx
+    @. ε̇.v.yy = (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy
+    @. ε̇.v.xy[2:end-1, 2:end-1] = 0.5 * ((V.vc.x[2:end-1, 2:end] - V.vc.x[2:end-1, 1:end-1]) / dy +
+                                          (V.cv.y[2:end, 2:end-1] - V.cv.y[1:end-1, 2:end-1]) / dx)
 
     # compute deviatoric stress
-    @. τ.c.xx = 2 * η.c[2:end-1, 2:end-1] * (V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx
-    @. τ.c.yy = 2 * η.c[2:end-1, 2:end-1] * (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
-    @. τ.c.xy[2:end-1, 2:end-1] = η.c[2:end-1, 2:end-1] * ((V.cv.x[2:end-1, 2:end] - V.cv.x[2:end-1, 1:end-1]) / dy +
-                                                           (V.vc.y[2:end, 2:end-1] - V.vc.y[1:end-1, 2:end-1]) / dx)
+    @. τ.c.xx = 2 * η.c[2:end-1, 2:end-1] * ε̇.c.xx
+    @. τ.c.yy = 2 * η.c[2:end-1, 2:end-1] * ε̇.c.yy
+    @. τ.c.xy[2:end-1, 2:end-1] = 2 * η.c[2:end-1, 2:end-1] * ε̇.c.xy[2:end-1, 2:end-1]
 
-    @. τ.v.xx = 2 * η.v * (V.cv.x[2:end, :] - V.cv.x[1:end-1, :]) / dx
-    @. τ.v.yy = 2 * η.v * (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy
-    @. τ.v.xy[2:end-1, 2:end-1] = η.v[2:end-1, 2:end-1] * ((V.vc.x[2:end-1, 2:end] - V.vc.x[2:end-1, 1:end-1]) / dy +
-                                                           (V.cv.y[2:end, 2:end-1] - V.cv.y[1:end-1, 2:end-1]) / dx)
+    @. τ.v.xx = 2 * η.v * ε̇.v.xx
+    @. τ.v.yy = 2 * η.v * ε̇.v.yy
+    @. τ.v.xy[2:end-1, 2:end-1] = 2 * η.v[2:end-1, 2:end-1] * ε̇.v.xy[2:end-1, 2:end-1]
+
+    return 0.5 * (sum(τ.c.xx .* ε̇.c.xx) + sum(τ.c.yy .* ε̇.c.yy)) + sum(τ.c.xy .* ε̇.c.xy) +
+           0.5 * (sum(τ.v.xx .* ε̇.v.xx) + sum(τ.v.yy .* ε̇.v.yy)) + sum(τ.v.xy .* ε̇.v.xy) -
+           sum((P_old.c .- 0.5γ .* ∇V.c) .* ∇V.c) - sum((P_old.v .- 0.5γ .* ∇V.v) .* ∇V.v) +
+           sum(ρg.vc.x .* V.vc.x[2:end-1, :]) + sum(ρg.vc.y .* V.vc.y[:, 2:end-1]) +
+           sum(ρg.cv.x .* V.cv.x[2:end-1, :]) + sum(ρg.cv.y .* V.cv.y[:, 2:end-1])
+end
+
+@views function residual!(R, V, P, P_old, ∇V, τ, ε̇, A, η, ρg, γ, dx, dy)
+    # compute effective viscosity
+    @. η.c[2:end-1, 2:end-1] = 0.5 * A.c^(-1)
+    @. η.c[[1, end], :] = η.c[[2, end - 1], :]
+    @. η.c[:, [1, end]] = η.c[:, [2, end - 1]]
+    @. η.v = 0.5 * A.v^(-1)
+
+    # compute velocity divergence
+    @. ∇V.c = (V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx +
+              (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
+
+    @. ∇V.v = (V.cv.x[2:end, :] - V.cv.x[1:end-1, :]) / dx +
+              (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy
+
+    # compute pressure
+    @. P.c = P_old.c - γ * ∇V.c
+    @. P.v = P_old.v - γ * ∇V.v
+
+    # compute deviatoric strain rates
+    @. ε̇.c.xx = (V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx
+    @. ε̇.c.yy = (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
+    @. ε̇.c.xy[2:end-1, 2:end-1] = 0.5 * ((V.cv.x[2:end-1, 2:end] - V.cv.x[2:end-1, 1:end-1]) / dy +
+                                          (V.vc.y[2:end, 2:end-1] - V.vc.y[1:end-1, 2:end-1]) / dx)
+
+    @. ε̇.v.xx = (V.cv.x[2:end, :] - V.cv.x[1:end-1, :]) / dx
+    @. ε̇.v.yy = (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy
+    @. ε̇.v.xy[2:end-1, 2:end-1] = 0.5 * ((V.vc.x[2:end-1, 2:end] - V.vc.x[2:end-1, 1:end-1]) / dy +
+                                          (V.cv.y[2:end, 2:end-1] - V.cv.y[1:end-1, 2:end-1]) / dx)
+
+    # compute deviatoric stress
+    @. τ.c.xx = 2 * η.c[2:end-1, 2:end-1] * ε̇.c.xx
+    @. τ.c.yy = 2 * η.c[2:end-1, 2:end-1] * ε̇.c.yy
+    @. τ.c.xy[2:end-1, 2:end-1] = 2 * η.c[2:end-1, 2:end-1] * ε̇.c.xy[2:end-1, 2:end-1]
+
+    @. τ.v.xx = 2 * η.v * ε̇.v.xx
+    @. τ.v.yy = 2 * η.v * ε̇.v.yy
+    @. τ.v.xy[2:end-1, 2:end-1] = 2 * η.v[2:end-1, 2:end-1] * ε̇.v.xy[2:end-1, 2:end-1]
 
     @. R.vc.x = (P.c[2:end, :] - P.c[1:end-1, :]) / dx -
                 (τ.c.xx[2:end, :] - τ.c.xx[1:end-1, :]) / dx -
@@ -88,15 +142,18 @@ end
                           + 2γ / dy^2)
 end
 
-@views function line_search(R, R̄, V, V̄, P, P̄, P_old, τ, τ̄, D, A, η, ρg, γ, δ, dx, dy)
+@views function line_search(R, R̄, V, V̄, P, P̄, P_old, ∇V, ∇V̄, τ, τ̄, ε̇, ε̄, D, A, η, ρg, γ, δ, dx, dy)
+    make_zero!(R̄)
+    make_zero!(V̄)
+    make_zero!(P̄)
+    make_zero!(τ̄)
+    make_zero!(ε̄)
+    make_zero!(∇V̄)
+
     @. V̄.vc.x[2:end-1, :] = D.vc.x
     @. V̄.vc.y[:, 2:end-1] = D.vc.y
     @. V̄.cv.x[2:end-1, :] = D.cv.x
     @. V̄.cv.y[:, 2:end-1] = D.cv.y
-
-    make_zero!(R̄)
-    make_zero!(P̄)
-    make_zero!(τ̄)
 
     autodiff(set_runtime_activity(Forward),
              residual!,
@@ -104,20 +161,12 @@ end
              Duplicated(V, V̄),
              Duplicated(P, P̄),
              Const(P_old),
+             Duplicated(∇V, ∇V̄),
              Duplicated(τ, τ̄),
+             Duplicated(ε̇, ε̄),
              Const(A), Const(η), Const(ρg), Const(γ), Const(dx), Const(dy))
 
     return -δ / dot_product(D, R̄)
-end
-
-@views function compute_divV!(∇V, V, dx, dy)
-    @. ∇V.c = (V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx +
-              (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
-
-    @. ∇V.v = (V.cv.x[2:end, :] - V.cv.x[1:end-1, :]) / dx +
-              (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy
-
-    return
 end
 
 @views function main()
@@ -132,10 +181,10 @@ end
     Ai  = (0.1, 0.2, 0.3)
     ρgi = (0.0, 0.0, 0.0)
     # numerics
-    nx, ny  = 50, 50
+    nx, ny = 50, 50
     maxiter = 100nx
-    ncheck  = 1nx
-    abstol  = 1e-6
+    ncheck = 1nx
+    abstol = 1e-6
     maxiter_ph = 50
     # PH params
     γ = 1.0e1
@@ -156,6 +205,12 @@ end
          v=(xx=zeros(nx + 1, ny + 1),
             yy=zeros(nx + 1, ny + 1),
             xy=zeros(nx + 1, ny + 1)))
+    ε̇ = (c=(xx=zeros(nx, ny),
+             yy=zeros(nx, ny),
+             xy=zeros(nx + 2, ny + 2)),
+          v=(xx=zeros(nx + 1, ny + 1),
+             yy=zeros(nx + 1, ny + 1),
+             xy=zeros(nx + 1, ny + 1)))
     # velocity
     V = (vc=(x=zeros(nx + 1, ny), y=zeros(nx + 1, ny + 2)),
          cv=(x=zeros(nx + 2, ny + 1), y=zeros(nx, ny + 1)))
@@ -177,10 +232,12 @@ end
     # velocity divergence
     ∇V = (c=zeros(nx, ny), v=zeros(nx + 1, ny + 1))
     #  shadows
-    R̄ = make_zero(R)
-    V̄ = make_zero(V)
-    P̄ = make_zero(P)
-    τ̄ = make_zero(τ)
+    R̄  = make_zero(R)
+    V̄  = make_zero(V)
+    P̄  = make_zero(P)
+    τ̄  = make_zero(τ)
+    ε̄  = make_zero(ε̇)
+    ∇V̄ = make_zero(∇V)
     # initial conditions
     incf(x, y, xi, yi, ri, Ai, Ab) = (x - xi)^2 + (y - yi)^2 < ri^2 ? Ai : Ab
     A.c .= Ab
@@ -213,21 +270,21 @@ end
         P_old.v .= P.v
         # velocity solver
         # init residual
-        residual!(R, V, P, P_old, τ, A, η, ρg, γ, dx, dy)
+        residual!(R, V, P, P_old, ∇V, τ, ε̇, A, η, ρg, γ, dx, dy)
         apply_preconditioner(Z, R, A, η, dx, dy, γ)
         # init search direction
         assign!(D, Z)
         δ = dot_product(R, Z)
         # CG iterative loop
         for iter in 1:maxiter
-            α = line_search(R, R̄, V, V̄, P, P̄, P_old, τ, τ̄, D, A, η, ρg, γ, δ, dx, dy)
+            α = line_search(R, R̄, V, V̄, P, P̄, P_old, ∇V, ∇V̄, τ, τ̄, ε̇, ε̄, D, A, η, ρg, γ, δ, dx, dy)
 
             @. V.vc.x[2:end-1, :] += α * D.vc.x
             @. V.vc.y[:, 2:end-1] += α * D.vc.y
             @. V.cv.x[2:end-1, :] += α * D.cv.x
             @. V.cv.y[:, 2:end-1] += α * D.cv.y
 
-            residual!(R, V, P, P_old, τ, A, η, ρg, γ, dx, dy)
+            residual!(R, V, P, P_old, ∇V, τ, ε̇, A, η, ρg, γ, dx, dy)
             apply_preconditioner(Z, R, A, η, dx, dy, γ)
 
             δ_new = dot_product(R, Z)
@@ -254,9 +311,6 @@ end
             end
         end
 
-        # check convergence
-        compute_divV!(∇V, V, dx, dy)
-
         err_Pr = (maximum(abs.(∇V.c)),
                   maximum(abs.(∇V.v)))
 
@@ -269,9 +323,34 @@ end
             break
         end
 
-        hms[2][3][] .= P.c
+        hms[2][3] = P.c
         display(fig)
     end
+
+    println("Check variational consistency")
+    residual!(R, V, P, P_old, ∇V, τ, ε̇, A, η, ρg, γ, dx, dy)
+
+    make_zero!(V̄)
+    make_zero!(P̄)
+    make_zero!(τ̄)
+    make_zero!(ε̄)
+    make_zero!(∇V̄)
+
+    Enzyme.autodiff(set_runtime_activity(Enzyme.Reverse), J,
+                    Active,
+                    Duplicated(V, V̄),
+                    Duplicated(P, P̄),
+                    Const(P_old),
+                    Duplicated(∇V, ∇V̄),
+                    Duplicated(τ, τ̄),
+                    Duplicated(ε̇, ε̄),
+                    Const(A), Const(η), Const(ρg), Const(γ), Const(dx), Const(dy))
+
+    vcheck = (maximum(abs.(V̄.vc.x[2:end-1, :] .- R.vc.x)),
+          maximum(abs.(V̄.cv.y[:, 2:end-1] .- R.cv.y)),
+          maximum(abs.(V̄.cv.x[2:end-1, :] .- R.cv.x)),
+          maximum(abs.(V̄.vc.y[:, 2:end-1] .- R.vc.y)))
+    @show vcheck
 
     return
 end
