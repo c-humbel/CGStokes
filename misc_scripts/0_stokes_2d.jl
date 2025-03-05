@@ -1,4 +1,4 @@
-using CairoMakie, Enzyme, LinearAlgebra
+using CairoMakie, Enzyme, LinearAlgebra, Printf
 
 @views function J()
     return
@@ -6,7 +6,9 @@ end
 
 @views function residual!(R, V, P, P_old, τ, A, η, ρg, γ, dx, dy)
     # compute effective viscosity
-    @. η.c = 0.5 * A.c^(-1)
+    @. η.c[2:end-1, 2:end-1] = 0.5 * A.c^(-1)
+    @. η.c[[1, end], :] .= η.c[[2, end - 1], :]
+    @. η.c[:, [1, end]] .= η.c[:, [2, end - 1]]
     @. η.v = 0.5 * A.v^(-1)
 
     # compute pressure
@@ -17,10 +19,10 @@ end
                             (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy)
 
     # compute deviatoric stress
-    @. τ.c.xx = 2 * η.c * (V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx
-    @. τ.c.yy = 2 * η.c * (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
-    @. τ.c.xy[2:end-1, 2:end-1] = η.c * ((V.cv.x[2:end-1, 2:end] - V.cv.x[2:end-1, 1:end-1]) / dy +
-                                         (V.vc.y[2:end, 2:end-1] - V.vc.y[1:end-1, 2:end-1]) / dx)
+    @. τ.c.xx = 2 * η.c[2:end-1, 2:end-1] * (V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx
+    @. τ.c.yy = 2 * η.c[2:end-1, 2:end-1] * (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
+    @. τ.c.xy[2:end-1, 2:end-1] = η.c[2:end-1, 2:end-1] * ((V.cv.x[2:end-1, 2:end] - V.cv.x[2:end-1, 1:end-1]) / dy +
+                                                           (V.vc.y[2:end, 2:end-1] - V.vc.y[1:end-1, 2:end-1]) / dx)
 
     @. τ.v.xx = 2 * η.v * (V.cv.x[2:end, :] - V.cv.x[1:end-1, :]) / dx
     @. τ.v.yy = 2 * η.v * (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy
@@ -48,21 +50,73 @@ end
     return
 end
 
-@views function preconditioner!(Z, R, η, dx, dy)
-    Z.vc.x .= R.vc.x ./ (η.c[1:end-1, :] + η.c[2:end, :] + η.v[2:end-1, 1:end-1] + η.v[2:end-1, 2:end])
-    Z.cv.y .= R.cv.y ./ (η.c[:, 1:end-1] + η.c[:, 2:end] + η.v[1:end-1, 2:end-1] + η.v[2:end, 2:end-1])
-
-    Z.cv.x[:, 2:end-1]  .= R.cv.x[:, 2:end-1] ./ (η.v[1:end-1, 2:end-1] + η.v[2:end, 2:end-1] + η.c[:, 1:end-1] + η.c[:, 2:end])
-    Z.cv.x[:, [1, end]] .= R.cv.x[:, [1, end]] ./ (η.v[1:end-1, [1, end]] + η.v[2:end, [1, end]])
-
-    Z.vc.y[2:end-1, :]  .= R.vc.y[2:end-1, :] ./ (η.v[2:end-1, 1:end-1] + η.v[2:end-1, 2:end] + η.c[1:end-1, :] + η.c[2:end, :])
-    Z.vc.y[[1, end], :] .= R.vc.y[[1, end], :] ./ (η.v[[1, end], 1:end-1] + η.v[[1, end], 2:end])
-
-    return
+@views function assign!(dest, src)
+    for loc in eachindex(dest)
+        for dir in eachindex(dest[loc])
+            dest[loc][dir] .= src[loc][dir]
+        end
+    end
 end
 
-@views function line_search!()
-    # TODO
+function dot_product(x, y)
+    sum = 0.0
+    for loc in eachindex(x)
+        for dir in eachindex(x[loc])
+            sum += dot(x[loc][dir], y[loc][dir])
+        end
+    end
+    return sum
+end
+
+@views function apply_preconditioner(Z, R, A, η, dx, dy, γ)
+    # apply preconditioner to the residual
+    # bc are included using ghost cells on η.c (what about η.v?)
+    @. Z.vc.x = R.vc.x / (2 * (η.c[2:end-2, 2:end-1] + η.c[3:end-1, 2:end-1]) / dx^2
+                          + (η.v[2:end-1, 1:end-1] + η.v[2:end-1, 2:end]) / dy^2
+                          + 2γ / dx^2)
+
+    @. Z.vc.y = R.vc.y / (2 * (η.v[:, 1:end-1] + η.v[:, 2:end]) / dy^2
+                          + (η.c[1:end-1, 2:end-1] + η.c[2:end, 2:end-1]) / dx^2
+                          + 2γ / dy^2)
+
+    @. Z.cv.x = R.cv.x / (2 * (η.v[1:end-1, :] + η.v[2:end, :]) / dx^2
+                          + (η.c[2:end-1, 1:end-1] + η.c[2:end-1, 2:end]) / dy^2
+                          + 2γ / dx^2)
+
+    @. Z.cv.y = R.cv.y / (2 * (η.c[2:end-1, 2:end-2] + η.c[2:end-1, 3:end-1]) / dy^2
+                          + (η.v[1:end-1, 2:end-1] + η.v[2:end, 2:end-1]) / dx^2
+                          + 2γ / dy^2)
+end
+
+@views function line_search(R, R̄, V, V̄, P, P̄, P_old, τ, τ̄, D, A, η, ρg, γ, δ, dx, dy)
+    @. V̄.vc.x[2:end-1, :] = D.vc.x
+    @. V̄.vc.y[:, 2:end-1] = D.vc.y
+    @. V̄.cv.x[2:end-1, :] = D.cv.x
+    @. V̄.cv.y[:, 2:end-1] = D.cv.y
+
+    make_zero!(R̄)
+    make_zero!(P̄)
+    make_zero!(τ̄)
+
+    autodiff(set_runtime_activity(Forward),
+             residual!,
+             DuplicatedNoNeed(R, R̄),
+             Duplicated(V, V̄),
+             Duplicated(P, P̄),
+             Const(P_old),
+             Duplicated(τ, τ̄),
+             Const(A), Const(η), Const(ρg), Const(γ), Const(dx), Const(dy))
+
+    return -δ / dot_product(D, R̄)
+end
+
+@views function compute_divV!(∇V, V, dx, dy)
+    @. ∇V.c = (V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx +
+              (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
+
+    @. ∇V.v = (V.cv.x[2:end, :] - V.cv.x[1:end-1, :]) / dx +
+              (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy
+
     return
 end
 
@@ -79,10 +133,12 @@ end
     ρgi = (0.0, 0.0, 0.0)
     # numerics
     nx, ny  = 50, 50
-    maxiter = 100nx^2
-    ncheck  = 1nx^2
+    maxiter = 100nx
+    ncheck  = 1nx
+    abstol  = 1e-6
+    maxiter_ph = 50
     # PH params
-    γ = 1.0
+    γ = 1.0e1
     # preprocessing
     dx, dy = lx / nx, ly / ny
     xv     = LinRange(-lx / 2, lx / 2, nx + 1)
@@ -104,7 +160,7 @@ end
     V = (vc=(x=zeros(nx + 1, ny), y=zeros(nx + 1, ny + 2)),
          cv=(x=zeros(nx + 2, ny + 1), y=zeros(nx, ny + 1)))
     # viscosity
-    η = (c=zeros(nx, ny), v=zeros(nx + 1, ny + 1))
+    η = (c=zeros(nx + 2, ny + 2), v=zeros(nx + 1, ny + 1))
     A = (c=zeros(nx, ny), v=zeros(nx + 1, ny + 1))
     # gravity
     ρg = (vc=(x=zeros(nx - 1, ny), y=zeros(nx + 1, ny)),
@@ -118,6 +174,13 @@ end
     # search direction
     D = (vc=(x=zeros(nx - 1, ny), y=zeros(nx + 1, ny)),
          cv=(x=zeros(nx, ny + 1), y=zeros(nx, ny - 1)))
+    # velocity divergence
+    ∇V = (c=zeros(nx, ny), v=zeros(nx + 1, ny + 1))
+    #  shadows
+    R̄ = make_zero(R)
+    V̄ = make_zero(V)
+    P̄ = make_zero(P)
+    τ̄ = make_zero(τ)
     # initial conditions
     incf(x, y, xi, yi, ri, Ai, Ab) = (x - xi)^2 + (y - yi)^2 < ri^2 ? Ai : Ab
     A.c .= Ab
@@ -144,18 +207,72 @@ end
            Colorbar(fig[2, 1][1, 2], hms[2]),
            Colorbar(fig[1, 2][1, 2], hms[3]))
     display(fig)
-    # velocity solver
-    residual!(R, V, P, P_old, τ, A, η, ρg, γ, dx, dy)
-    preconditioner!(Z, R, η, dx, dy)
-    D.vc.x .= Z.vc.x
-    D.cv.y .= Z.cv.y
-    D.cv.x .= Z.cv.x
-    D.vc.y .= Z.vc.y
+    # Powell-Hestenes pressure solver
+    for iter_ph in 1:maxiter_ph
+        P_old.c .= P.c
+        P_old.v .= P.v
+        # velocity solver
+        # init residual
+        residual!(R, V, P, P_old, τ, A, η, ρg, γ, dx, dy)
+        apply_preconditioner(Z, R, A, η, dx, dy, γ)
+        # init search direction
+        assign!(D, Z)
+        δ = dot_product(R, Z)
+        # CG iterative loop
+        for iter in 1:maxiter
+            α = line_search(R, R̄, V, V̄, P, P̄, P_old, τ, τ̄, D, A, η, ρg, γ, δ, dx, dy)
 
-    for iter in 1:maxiter
-        # TODO
-        break
+            @. V.vc.x[2:end-1, :] += α * D.vc.x
+            @. V.vc.y[:, 2:end-1] += α * D.vc.y
+            @. V.cv.x[2:end-1, :] += α * D.cv.x
+            @. V.cv.y[:, 2:end-1] += α * D.cv.y
+
+            residual!(R, V, P, P_old, τ, A, η, ρg, γ, dx, dy)
+            apply_preconditioner(Z, R, A, η, dx, dy, γ)
+
+            δ_new = dot_product(R, Z)
+            β = δ_new / δ
+            δ = δ_new
+
+            @. D.vc.x = β * D.vc.x + Z.vc.x
+            @. D.vc.y = β * D.vc.y + Z.vc.y
+            @. D.cv.x = β * D.cv.x + Z.cv.x
+            @. D.cv.y = β * D.cv.y + Z.cv.y
+
+            if iter % ncheck == 0
+                err = (maximum(abs.(R.vc.x)),
+                       maximum(abs.(R.cv.y)),
+                       maximum(abs.(R.cv.x)),
+                       maximum(abs.(R.vc.y)))
+                @printf("    iter  = %.1f × N, err = [%1.3e, %1.3e, %1.3e, %1.3e]\n", iter / nx, err...)
+                if any(!isfinite, err)
+                    error("simulation failed")
+                end
+                if all(err .< abstol)
+                    break
+                end
+            end
+        end
+
+        # check convergence
+        compute_divV!(∇V, V, dx, dy)
+
+        err_Pr = (maximum(abs.(∇V.c)),
+                  maximum(abs.(∇V.v)))
+
+        @printf("iter_ph = %d, err_Pr = [%1.3e, %1.3e]\n", iter_ph, err_Pr...)
+
+        if any(!isfinite, err_Pr)
+            error("simulation failed")
+        end
+        if all(err_Pr .< abstol)
+            break
+        end
+
+        hms[2][3][] .= P.c
+        display(fig)
     end
+
     return
 end
 
