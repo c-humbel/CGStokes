@@ -1,4 +1,4 @@
-# Step 1: linear Stokes solver in 2D with variationally consistent residual
+# Step 2: linear Stokes solver in 2D with variationally consistent residual
 # and variational boundary conditions
 # and no-slip bedrock boundary 
 using CairoMakie, Enzyme, LinearAlgebra, Printf

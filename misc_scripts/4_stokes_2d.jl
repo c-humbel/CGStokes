@@ -1,15 +1,10 @@
-# Step 3: linear Stokes solver in 2D with variationally consistent residual
+# Step 4: non-linear Stokes solver in 2D with variationally consistent residual
 # and variational boundary conditions
 # and no-slip bedrock boundary 
 # adapted for continuous volume fractions
 using CairoMakie, Enzyme, LinearAlgebra, Printf
 
-@views function J(V, P, P_old, ∇V, τ, ε̇, A, η, ρg, ω_air, ω_bed, γ, dx, dy)
-    @. η.c[2:end-1, 2:end-1] = 0.5 * A.c^(-1)
-    @. η.c[[1, end], :] = η.c[[2, end - 1], :]
-    @. η.c[:, [1, end]] = η.c[:, [2, end - 1]]
-    @. η.v = 0.5 * A.v^(-1)
-
+@views function J(V, P, P_old, ∇V, ε̇, ρg, B, p, ε̇bg, ω_air, ω_bed, γ, dx, dy)
     # compute velocity divergence
     @. ∇V.c = (V.vc.x[2:end, :] * ω_bed.vc.x[2:end, :] - V.vc.x[1:end-1, :] * ω_bed.vc.x[1:end-1, :]) / dx +
               (V.cv.y[:, 2:end] * ω_bed.cv.y[:, 2:end] - V.cv.y[:, 1:end-1] * ω_bed.cv.y[:, 1:end-1]) / dy
@@ -32,30 +27,16 @@ using CairoMakie, Enzyme, LinearAlgebra, Printf
     @. ε̇.v.xy[2:end-1, 2:end-1] = 0.5 * ((V.vc.x[2:end-1, 2:end] * ω_bed.vc.x[2:end-1, 2:end] - V.vc.x[2:end-1, 1:end-1] * ω_bed.vc.x[2:end-1, 1:end-1]) / dy +
                                           (V.cv.y[2:end, 2:end-1] * ω_bed.cv.y[2:end, 2:end-1] - V.cv.y[1:end-1, 2:end-1] * ω_bed.cv.y[1:end-1, 2:end-1]) / dx)
 
-    # compute deviatoric stress
-    @. τ.c.xx = 2 * η.c[2:end-1, 2:end-1] * ε̇.c.xx
-    @. τ.c.yy = 2 * η.c[2:end-1, 2:end-1] * ε̇.c.yy
-    @. τ.c.xy[2:end-1, 2:end-1] = 2 * η.c[2:end-1, 2:end-1] * ε̇.c.xy[2:end-1, 2:end-1]
-
-    @. τ.v.xx = 2 * η.v * ε̇.v.xx
-    @. τ.v.yy = 2 * η.v * ε̇.v.yy
-    @. τ.v.xy[2:end-1, 2:end-1] = 2 * η.v[2:end-1, 2:end-1] * ε̇.v.xy[2:end-1, 2:end-1]
-
-    return 0.5 * (sum(τ.c.xx .* ε̇.c.xx .* ω_air.c[2:end-1, 2:end-1]) + sum(τ.c.yy .* ε̇.c.yy .* ω_air.c[2:end-1, 2:end-1])) +
-           sum(τ.c.xy .* ε̇.c.xy .* ω_air.c) +
-           0.5 * (sum(τ.v.xx .* ε̇.v.xx .* ω_air.v) + sum(τ.v.yy .* ε̇.v.yy .* ω_air.v)) + sum(τ.v.xy .* ε̇.v.xy .* ω_air.v) -
+    return 2.0 / p * B * sum((0.5 .* (ε̇.c.xx .^ 2 .+ ε̇.c.yy .^ 2) .+ ε̇.c.xy[2:end-1, 2:end-1] .^ 2 .+ ε̇bg^2) .^ (p / 2) .* ω_air.c[2:end-1, 2:end-1]) +
+           2.0 / p * B * sum((0.5 .* (ε̇.v.xx .^ 2 .+ ε̇.v.yy .^ 2) .+ ε̇.v.xy .^ 2 .+ ε̇bg^2) .^ (p / 2) .* ω_air.v) -
            sum((P_old.c .- 0.5γ .* ∇V.c) .* ∇V.c .* ω_air.c[2:end-1, 2:end-1]) - sum((P_old.v .- 0.5γ .* ∇V.v) .* ∇V.v .* ω_air.v) +
-           sum(ρg.vc.x .* V.vc.x[2:end-1, :] .* ω_bed.vc.x[2:end-1, :] .* ω_air.vc.x) + sum(ρg.vc.y .* V.vc.y[:, 2:end-1] .* ω_bed.vc.y[:, 2:end-1] .* ω_air.vc.y) +
-           sum(ρg.cv.x .* V.cv.x[2:end-1, :] .* ω_bed.cv.x[2:end-1, :] .* ω_air.cv.x) + sum(ρg.cv.y .* V.cv.y[:, 2:end-1] .* ω_bed.cv.y[:, 2:end-1] .* ω_air.cv.y)
+           sum(ρg.vc.x .* V.vc.x[2:end-1, :] .* ω_bed.vc.x[2:end-1, :] .* ω_air.vc.x) +
+           sum(ρg.vc.y .* V.vc.y[:, 2:end-1] .* ω_bed.vc.y[:, 2:end-1] .* ω_air.vc.y) +
+           sum(ρg.cv.x .* V.cv.x[2:end-1, :] .* ω_bed.cv.x[2:end-1, :] .* ω_air.cv.x) +
+           sum(ρg.cv.y .* V.cv.y[:, 2:end-1] .* ω_bed.cv.y[:, 2:end-1] .* ω_air.cv.y)
 end
 
-@views function residual!(R, V, P, P_old, ∇V, τ, ε̇, A, η, ρg, ω_air, ω_bed, γ, dx, dy)
-    # compute effective viscosity
-    @. η.c[2:end-1, 2:end-1] = 0.5 * A.c^(-1)
-    @. η.c[[1, end], :] = η.c[[2, end - 1], :]
-    @. η.c[:, [1, end]] = η.c[:, [2, end - 1]]
-    @. η.v = 0.5 * A.v^(-1)
-
+@views function residual!(R, V, P, P_old, ∇V, τ, ε̇, η, ρg, B, p, ε̇bg, ω_air, ω_bed, γ, dx, dy)
     # compute velocity divergence
     @. ∇V.c = (V.vc.x[2:end, :] * ω_bed.vc.x[2:end, :] - V.vc.x[1:end-1, :] * ω_bed.vc.x[1:end-1, :]) / dx +
               (V.cv.y[:, 2:end] * ω_bed.cv.y[:, 2:end] - V.cv.y[:, 1:end-1] * ω_bed.cv.y[:, 1:end-1]) / dy
@@ -77,6 +58,12 @@ end
     @. ε̇.v.yy = (V.vc.y[:, 2:end] * ω_bed.vc.y[:, 2:end] - V.vc.y[:, 1:end-1] * ω_bed.vc.y[:, 1:end-1]) / dy
     @. ε̇.v.xy[2:end-1, 2:end-1] = 0.5 * ((V.vc.x[2:end-1, 2:end] * ω_bed.vc.x[2:end-1, 2:end] - V.vc.x[2:end-1, 1:end-1] * ω_bed.vc.x[2:end-1, 1:end-1]) / dy +
                                           (V.cv.y[2:end, 2:end-1] * ω_bed.cv.y[2:end, 2:end-1] - V.cv.y[1:end-1, 2:end-1] * ω_bed.cv.y[1:end-1, 2:end-1]) / dx)
+
+    # compute effective viscosity
+    @. η.c[2:end-1, 2:end-1] = B * (0.5 * (ε̇.c.xx^2 + ε̇.c.yy^2) + ε̇.c.xy[2:end-1, 2:end-1]^2 + ε̇bg^2)^((p - 2) / 2)
+    @. η.c[[1, end], :] = η.c[[2, end - 1], :]
+    @. η.c[:, [1, end]] = η.c[:, [2, end - 1]]
+    @. η.v = B * (0.5 * (ε̇.v.xx^2 + ε̇.v.yy^2) + ε̇.v.xy^2 + ε̇bg^2)^((p - 2) / 2)
 
     # compute deviatoric stress
     @. τ.c.xx = 2 * η.c[2:end-1, 2:end-1] * ε̇.c.xx
@@ -127,7 +114,7 @@ function dot_product(x, y)
     return sum
 end
 
-@views function apply_preconditioner(Z, R, A, η, ω, dx, dy, γ)
+@views function apply_preconditioner(Z, R, η, dx, dy, γ)
     # apply preconditioner to the residual
     # bc are included using ghost cells on η.c (what about η.v?)
     @. Z.vc.x = R.vc.x / (2 * (η.c[2:end-2, 2:end-1] + η.c[3:end-1, 2:end-1]) / dx^2
@@ -145,15 +132,18 @@ end
     @. Z.cv.y = R.cv.y / (2 * (η.c[2:end-1, 2:end-2] + η.c[2:end-1, 3:end-1]) / dy^2
                           + (η.v[1:end-1, 2:end-1] + η.v[2:end, 2:end-1]) / dx^2
                           + 2γ / dy^2)
+
+    return
 end
 
-@views function line_search(R, R̄, V, V̄, P, P̄, P_old, ∇V, ∇V̄, τ, τ̄, ε̇, ε̄, D, A, η, ρg, ω_air, ω_bed, γ, δ, dx, dy)
+@views function line_search(R, R̄, V, V̄, P, P̄, P_old, ∇V, ∇V̄, τ, τ̄, ε̇, ε̄, η, η̄, D, ρg, B, p, ε̇bg, ω_air, ω_bed, γ, δ, dx, dy)
     make_zero!(R̄)
     make_zero!(V̄)
     make_zero!(P̄)
     make_zero!(τ̄)
     make_zero!(ε̄)
     make_zero!(∇V̄)
+    make_zero!(η̄)
 
     @. V̄.vc.x[2:end-1, :] = D.vc.x
     @. V̄.vc.y[:, 2:end-1] = D.vc.y
@@ -169,7 +159,8 @@ end
              Duplicated(∇V, ∇V̄),
              Duplicated(τ, τ̄),
              Duplicated(ε̇, ε̄),
-             Const(A), Const(η), Const(ρg), Const(ω_air), Const(ω_bed), Const(γ), Const(dx), Const(dy))
+             Duplicated(η, η̄),
+             Const(ρg), Const(B), Const(p), Const(ε̇bg), Const(ω_air), Const(ω_bed), Const(γ), Const(dx), Const(dy))
 
     return -δ / dot_product(D, R̄)
 end
@@ -183,13 +174,13 @@ end
 @views function main()
     # physics
     lx, ly = 1.0, 1.0
-    Ab     = 1.0
+    p      = 1 + 1 / 3
+    B      = 1.0
     ρgb    = 1.0
     # inclusions
     ri  = (0.1, 0.15, 0.2)
     xi  = (-0.3, 0.0, 0.2)
     yi  = (-0.3, 0.2, -0.2)
-    Ai  = (0.1, 0.2, 0.3)
     ρgi = (0.0, 0.0, 0.0)
     # free surface
     xf = 0.0lx
@@ -201,13 +192,14 @@ end
     rb = 1.6ly
     # numerics
     nx, ny = 50, 50
-    maxiter = 100nx
-    ncheck = 1nx
-    abstol = 1e-6
-    maxiter_ph = 50
-    # maxiter = 10
-    # ncheck = 1
-    # maxiter_ph = 1
+    # maxiter    = 100nx
+    # ncheck     = 1nx
+    # maxiter_ph = 50
+    abstol     = 1e-6
+    ε̇bg       = 1e-6
+    maxiter    = 1
+    maxiter_ph = 1
+    ncheck     = 1
     # PH params
     γ = 1.0e1
     # preprocessing
@@ -245,7 +237,6 @@ end
          cv=(x=zeros(nx + 2, ny + 1), y=zeros(nx, ny + 1)))
     # viscosity
     η = (c=zeros(nx + 2, ny + 2), v=zeros(nx + 1, ny + 1))
-    A = (c=zeros(nx, ny), v=zeros(nx + 1, ny + 1))
     # gravity
     ρg = (vc=(x=zeros(nx - 1, ny), y=zeros(nx + 1, ny)),
           cv=(x=zeros(nx, ny + 1), y=zeros(nx, ny - 1)))
@@ -266,17 +257,13 @@ end
     P̄  = make_zero(P)
     τ̄  = make_zero(τ)
     ε̄  = make_zero(ε̇)
+    η̄  = make_zero(η)
     ∇V̄ = make_zero(∇V)
     # initial conditions
     incf(x, y, xi, yi, ri, Ai, Ab) = (x - xi)^2 + (y - yi)^2 < ri^2 ? Ai : Ab
-    A.c .= Ab
-    A.v .= Ab
     ρg.vc.y .= ρgb
     ρg.cv.y .= ρgb
-    for (_xi, _yi, _ri, Ai, ρgi) in zip(xi, yi, ri, Ai, ρgi)
-        # flow parameter
-        broadcast!((x, y, _A) -> incf(x, y, _xi, _yi, _ri, Ai, _A), A.c, xc, yc', A.c)
-        broadcast!((x, y, _A) -> incf(x, y, _xi, _yi, _ri, Ai, _A), A.v, xv, yv', A.v)
+    for (_xi, _yi, _ri, ρgi) in zip(xi, yi, ri, ρgi)
         # gravity
         broadcast!((x, y, _ρg) -> incf(x, y, _xi, _yi, _ri, ρgi, _ρg), ρg.vc.y, xv, yc', ρg.vc.y)
         broadcast!((x, y, _ρg) -> incf(x, y, _xi, _yi, _ri, ρgi, _ρg), ρg.cv.y, xc, yv[2:end-1]', ρg.cv.y)
@@ -304,13 +291,13 @@ end
 
     # plots
     fig = Figure(; size=(600, 450))
-    axs = (Axis(fig[1, 1][1, 1]; aspect=DataAspect(), xlabel="x", ylabel="y", title="A"),
+    axs = (Axis(fig[1, 1][1, 1]; aspect=DataAspect(), xlabel="x", ylabel="y", title="ρg"),
            Axis(fig[2, 1][1, 1]; aspect=DataAspect(), xlabel="x", ylabel="y", title="P"),
-           Axis(fig[1, 2][1, 1]; aspect=DataAspect(), xlabel="x", ylabel="y", title="ρg"),
+           Axis(fig[1, 2][1, 1]; aspect=DataAspect(), xlabel="x", ylabel="y", title="Vy"),
            Axis(fig[2, 2][1, 1]; aspect=DataAspect(), xlabel="x", ylabel="y", title="ω"))
-    hms = (heatmap!(axs[1], xc, yc, A.c; colormap=:roma),
+    hms = (heatmap!(axs[1], xv, yc, ρg.vc.y; colormap=:roma),
            heatmap!(axs[2], xc, yc, P.c; colormap=:turbo),
-           heatmap!(axs[3], xv, yc, ρg.vc.y; colormap=:viridis),
+           heatmap!(axs[3], xv, yc, V.vc.y[:, 2:end-1]; colormap=:viridis),
            heatmap!(axs[4], xc, yc, ω_air.c .* ω_bed.c; colormap=Makie.Reverse(:grays)))
     cbs = (Colorbar(fig[1, 1][1, 2], hms[1]),
            Colorbar(fig[2, 1][1, 2], hms[2]),
@@ -323,22 +310,22 @@ end
         P_old.v .= P.v
         # velocity solver
         # init residual
-        residual!(R, V, P, P_old, ∇V, τ, ε̇, A, η, ρg, ω_air, ω_bed, γ, dx, dy)
-        apply_preconditioner(Z, R, A, η, ω_air, dx, dy, γ)
+        residual!(R, V, P, P_old, ∇V, τ, ε̇, η, ρg, B, p, ε̇bg, ω_air, ω_bed, γ, dx, dy)
+        apply_preconditioner(Z, R, η, dx, dy, γ)
         # init search direction
         assign!(D, Z)
         δ = dot_product(R, Z)
         # CG iterative loop
         for iter in 1:maxiter
-            α = line_search(R, R̄, V, V̄, P, P̄, P_old, ∇V, ∇V̄, τ, τ̄, ε̇, ε̄, D, A, η, ρg, ω_air, ω_bed, γ, δ, dx, dy)
+            α = line_search(R, R̄, V, V̄, P, P̄, P_old, ∇V, ∇V̄, τ, τ̄, ε̇, ε̄, η, η̄, D, ρg, B, p, ε̇bg, ω_air, ω_bed, γ, δ, dx, dy)
 
             @. V.vc.x[2:end-1, :] += α * D.vc.x
             @. V.vc.y[:, 2:end-1] += α * D.vc.y
             @. V.cv.x[2:end-1, :] += α * D.cv.x
             @. V.cv.y[:, 2:end-1] += α * D.cv.y
 
-            residual!(R, V, P, P_old, ∇V, τ, ε̇, A, η, ρg, ω_air, ω_bed, γ, dx, dy)
-            apply_preconditioner(Z, R, A, η, ω_air, dx, dy, γ)
+            residual!(R, V, P, P_old, ∇V, τ, ε̇, η, ρg, B, p, ε̇bg, ω_air, ω_bed, γ, dx, dy)
+            apply_preconditioner(Z, R, η, dx, dy, γ)
 
             δ_new = dot_product(R, Z)
             β = δ_new / δ
@@ -362,9 +349,9 @@ end
                     break
                 end
 
-                hms[2][3] = P.c .* ω_air.c[2:end-1, 2:end-1]
-                hms[3][3] = V.vc.y[:, 2:end-1] .* ω_bed.vc.y[:, 2:end-1]
-                display(fig)
+                # hms[2][3] = P.c .* ω_air.c[2:end-1, 2:end-1]
+                # hms[3][3] = V.vc.y[:, 2:end-1] .* ω_bed.vc.y[:, 2:end-1]
+                # display(fig)
             end
         end
 
@@ -386,11 +373,10 @@ end
     end
 
     println("Check variational consistency")
-    residual!(R, V, P, P_old, ∇V, τ, ε̇, A, η, ρg, ω_air, ω_bed, γ, dx, dy)
+    residual!(R, V, P, P_old, ∇V, τ, ε̇, η, ρg, B, p, ε̇bg, ω_air, ω_bed, γ, dx, dy)
 
     make_zero!(V̄)
     make_zero!(P̄)
-    make_zero!(τ̄)
     make_zero!(ε̄)
     make_zero!(∇V̄)
 
@@ -400,9 +386,8 @@ end
                     Duplicated(P, P̄),
                     Const(P_old),
                     Duplicated(∇V, ∇V̄),
-                    Duplicated(τ, τ̄),
                     Duplicated(ε̇, ε̄),
-                    Const(A), Const(η), Const(ρg), Const(ω_air), Const(ω_bed), Const(γ), Const(dx), Const(dy))
+                    Const(ρg), Const(B), Const(p), Const(ε̇bg), Const(ω_air), Const(ω_bed), Const(γ), Const(dx), Const(dy))
 
     vcheck = (maximum(abs.(V̄.vc.x[2:end-1, :] .- R.vc.x)),
               maximum(abs.(V̄.cv.y[:, 2:end-1] .- R.cv.y)),
