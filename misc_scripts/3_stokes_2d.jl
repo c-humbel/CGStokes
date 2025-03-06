@@ -11,35 +11,35 @@ using CairoMakie, Enzyme, LinearAlgebra, Printf
     @. η.v = 0.5 * A.v^(-1)
 
     # compute velocity divergence
-    @. ∇V.c = (ω_bed.vc.x[2:end, :] * V.vc.x[2:end, :] - ω_bed.vc.x[1:end-1, :] * V.vc.x[1:end-1, :]) / dx +
-              (ω_bed.cv.y[:, 2:end] * V.cv.y[:, 2:end] - ω_bed.cv.y[:, 1:end-1] * V.cv.y[:, 1:end-1]) / dy
+    @. ∇V.c = (V.vc.x[2:end, :] * ω_bed.vc.x[2:end, :] - V.vc.x[1:end-1, :] * ω_bed.vc.x[1:end-1, :]) / dx +
+              (V.cv.y[:, 2:end] * ω_bed.cv.y[:, 2:end] - V.cv.y[:, 1:end-1] * ω_bed.cv.y[:, 1:end-1]) / dy
 
-    @. ∇V.v = (ω_bed.cv.x[2:end, :] * V.cv.x[2:end, :] - ω_bed.cv.x[1:end-1, :] * V.cv.x[1:end-1, :]) / dx +
-              (ω_bed.vc.y[:, 2:end] * V.vc.y[:, 2:end] - ω_bed.vc.y[:, 1:end-1] * V.vc.y[:, 1:end-1]) / dy
+    @. ∇V.v = (V.cv.x[2:end, :] * ω_bed.cv.x[2:end, :] - V.cv.x[1:end-1, :] * ω_bed.cv.x[1:end-1, :]) / dx +
+              (V.vc.y[:, 2:end] * ω_bed.vc.y[:, 2:end] - V.vc.y[:, 1:end-1] * ω_bed.vc.y[:, 1:end-1]) / dy
 
-    @. ∇V.c[2:end-1, 2:end-1] *= ω_air.vc.x[2:end, 2:end-1] * ω_air.vc.x[1:end-1, 2:end-1] * ω_air.cv.y[2:end-1, 2:end] * ω_air.cv.y[2:end-1, 1:end-1] != 0
-    @. ∇V.v[2:end-1, 2:end-1] *= ω_air.cv.x[2:end, 2:end-1] * ω_air.cv.x[1:end-1, 2:end-1] * ω_air.vc.y[2:end-1, 2:end] * ω_air.vc.y[2:end-1, 1:end-1] != 0
-    @. ∇V.c[2:end-1, [1, end]] *= ω_air.vc.x[2:end, [1, end]] * ω_air.vc.x[1:end-1, [1, end]] * ω_air.cv.y[2:end-1, [1, end]] != 0
-    @. ∇V.v[2:end-1, [1, end]] *= ω_air.cv.x[2:end, [1, end]] * ω_air.cv.x[1:end-1, [1, end]] * ω_air.vc.y[2:end-1, [1, end]] != 0
-    @. ∇V.c[[1, end], 2:end-1] *= ω_air.vc.x[[1, end], 2:end-1] * ω_air.cv.y[[1, end], 2:end] * ω_air.cv.y[[1, end], 1:end-1] != 0
-    @. ∇V.v[[1, end], 2:end-1] *= ω_air.cv.x[[1, end], 2:end-1] * ω_air.vc.y[[1, end], 2:end] * ω_air.vc.y[[1, end], 1:end-1] != 0
-    @. ∇V.c[[1, end], [1, end]] *= ω_air.vc.x[[1, end], [1, end]] * ω_air.cv.y[[1, end], [1, end]] != 0
-    @. ∇V.v[[1, end], [1, end]] *= ω_air.cv.x[[1, end], [1, end]] * ω_air.vc.y[[1, end], [1, end]] != 0
+    # @. ∇V.c[2:end-1, 2:end-1] *= ω_air.vc.x[2:end, 2:end-1] * ω_air.vc.x[1:end-1, 2:end-1] * ω_air.cv.y[2:end-1, 2:end] * ω_air.cv.y[2:end-1, 1:end-1] != 0
+    # @. ∇V.v[2:end-1, 2:end-1] *= ω_air.cv.x[2:end, 2:end-1] * ω_air.cv.x[1:end-1, 2:end-1] * ω_air.vc.y[2:end-1, 2:end] * ω_air.vc.y[2:end-1, 1:end-1] != 0
+    # @. ∇V.c[2:end-1, [1, end]] *= ω_air.vc.x[2:end, [1, end]] * ω_air.vc.x[1:end-1, [1, end]] * ω_air.cv.y[2:end-1, [1, end]] != 0
+    # @. ∇V.v[2:end-1, [1, end]] *= ω_air.cv.x[2:end, [1, end]] * ω_air.cv.x[1:end-1, [1, end]] * ω_air.vc.y[2:end-1, [1, end]] != 0
+    # @. ∇V.c[[1, end], 2:end-1] *= ω_air.vc.x[[1, end], 2:end-1] * ω_air.cv.y[[1, end], 2:end] * ω_air.cv.y[[1, end], 1:end-1] != 0
+    # @. ∇V.v[[1, end], 2:end-1] *= ω_air.cv.x[[1, end], 2:end-1] * ω_air.vc.y[[1, end], 2:end] * ω_air.vc.y[[1, end], 1:end-1] != 0
+    # @. ∇V.c[[1, end], [1, end]] *= ω_air.vc.x[[1, end], [1, end]] * ω_air.cv.y[[1, end], [1, end]] != 0
+    # @. ∇V.v[[1, end], [1, end]] *= ω_air.cv.x[[1, end], [1, end]] * ω_air.vc.y[[1, end], [1, end]] != 0
 
     # compute pressure
     @. P.c = P_old.c - γ * ∇V.c
     @. P.v = P_old.v - γ * ∇V.v
 
     # compute deviatoric strain rates
-    @. ε̇.c.xx = (ω_bed.vc.x[2:end, :] * V.vc.x[2:end, :] - ω_bed.vc.x[1:end-1, :] * V.vc.x[1:end-1, :]) / dx
-    @. ε̇.c.yy = (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
-    @. ε̇.c.xy[2:end-1, 2:end-1] = 0.5 * ((V.cv.x[2:end-1, 2:end] - V.cv.x[2:end-1, 1:end-1]) / dy +
-                                          (V.vc.y[2:end, 2:end-1] - V.vc.y[1:end-1, 2:end-1]) / dx)
+    @. ε̇.c.xx = (V.vc.x[2:end, :] * ω_bed.vc.x[2:end, :] - V.vc.x[1:end-1, :] * ω_bed.vc.x[1:end-1, :]) / dx
+    @. ε̇.c.yy = (V.cv.y[:, 2:end] * ω_bed.cv.y[:, 2:end] - V.cv.y[:, 1:end-1] * ω_bed.cv.y[:, 1:end-1]) / dy
+    @. ε̇.c.xy[2:end-1, 2:end-1] = 0.5 * ((V.cv.x[2:end-1, 2:end] * ω_bed.cv.x[2:end-1, 2:end] - V.cv.x[2:end-1, 1:end-1] * ω_bed.cv.x[2:end-1, 1:end-1]) / dy +
+                                          (V.vc.y[2:end, 2:end-1] * ω_bed.vc.y[2:end, 2:end-1] - V.vc.y[1:end-1, 2:end-1] * ω_bed.vc.y[1:end-1, 2:end-1]) / dx)
 
-    @. ε̇.v.xx = (V.cv.x[2:end, :] - V.cv.x[1:end-1, :]) / dx
-    @. ε̇.v.yy = (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy
-    @. ε̇.v.xy[2:end-1, 2:end-1] = 0.5 * ((V.vc.x[2:end-1, 2:end] - V.vc.x[2:end-1, 1:end-1]) / dy +
-                                          (V.cv.y[2:end, 2:end-1] - V.cv.y[1:end-1, 2:end-1]) / dx)
+    @. ε̇.v.xx = (V.cv.x[2:end, :] * ω_bed.cv.x[2:end, :] - V.cv.x[1:end-1, :] * ω_bed.cv.x[1:end-1, :]) / dx
+    @. ε̇.v.yy = (V.vc.y[:, 2:end] * ω_bed.vc.y[:, 2:end] - V.vc.y[:, 1:end-1] * ω_bed.vc.y[:, 1:end-1]) / dy
+    @. ε̇.v.xy[2:end-1, 2:end-1] = 0.5 * ((V.vc.x[2:end-1, 2:end] * ω_bed.vc.x[2:end-1, 2:end] - V.vc.x[2:end-1, 1:end-1] * ω_bed.vc.x[2:end-1, 1:end-1]) / dy +
+                                          (V.cv.y[2:end, 2:end-1] * ω_bed.cv.y[2:end, 2:end-1] - V.cv.y[1:end-1, 2:end-1] * ω_bed.cv.y[1:end-1, 2:end-1]) / dx)
 
     # compute deviatoric stress
     @. τ.c.xx = 2 * η.c[2:end-1, 2:end-1] * ε̇.c.xx
@@ -50,11 +50,12 @@ using CairoMakie, Enzyme, LinearAlgebra, Printf
     @. τ.v.yy = 2 * η.v * ε̇.v.yy
     @. τ.v.xy[2:end-1, 2:end-1] = 2 * η.v[2:end-1, 2:end-1] * ε̇.v.xy[2:end-1, 2:end-1]
 
-    return 0.5 * (sum(τ.c.xx .* ε̇.c.xx .* ω_air.c[2:end-1, 2:end-1]) + sum(τ.c.yy .* ε̇.c.yy .* ω_air.c[2:end-1, 2:end-1])) + sum(τ.c.xy .* ε̇.c.xy .* ω_air.c) +
+    return 0.5 * (sum(τ.c.xx .* ε̇.c.xx .* ω_air.c[2:end-1, 2:end-1]) + sum(τ.c.yy .* ε̇.c.yy .* ω_air.c[2:end-1, 2:end-1])) +
+           sum(τ.c.xy .* ε̇.c.xy .* ω_air.c) +
            0.5 * (sum(τ.v.xx .* ε̇.v.xx .* ω_air.v) + sum(τ.v.yy .* ε̇.v.yy .* ω_air.v)) + sum(τ.v.xy .* ε̇.v.xy .* ω_air.v) -
            sum((P_old.c .- 0.5γ .* ∇V.c) .* ∇V.c .* ω_air.c[2:end-1, 2:end-1]) - sum((P_old.v .- 0.5γ .* ∇V.v) .* ∇V.v .* ω_air.v) +
-           sum(ρg.vc.x .* V.vc.x[2:end-1, :] .* ω_air.vc.x) + sum(ρg.vc.y .* V.vc.y[:, 2:end-1] .* ω_air.vc.y) +
-           sum(ρg.cv.x .* V.cv.x[2:end-1, :] .* ω_air.cv.x) + sum(ρg.cv.y .* V.cv.y[:, 2:end-1] .* ω_air.cv.y)
+           sum(ρg.vc.x .* V.vc.x[2:end-1, :] .* ω_bed.vc.x[2:end-1, :] .* ω_air.vc.x) + sum(ρg.vc.y .* V.vc.y[:, 2:end-1] .* ω_bed.vc.y[:, 2:end-1] .* ω_air.vc.y) +
+           sum(ρg.cv.x .* V.cv.x[2:end-1, :] .* ω_bed.cv.x[2:end-1, :] .* ω_air.cv.x) + sum(ρg.cv.y .* V.cv.y[:, 2:end-1] .* ω_bed.cv.y[:, 2:end-1] .* ω_air.cv.y)
 end
 
 @views function residual!(R, V, P, P_old, ∇V, τ, ε̇, A, η, ρg, ω_air, ω_bed, γ, dx, dy)
@@ -65,35 +66,35 @@ end
     @. η.v = 0.5 * A.v^(-1)
 
     # compute velocity divergence
-    @. ∇V.c = (V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx +
-              (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
+    @. ∇V.c = (V.vc.x[2:end, :] * ω_bed.vc.x[2:end, :] - V.vc.x[1:end-1, :] * ω_bed.vc.x[1:end-1, :]) / dx +
+              (V.cv.y[:, 2:end] * ω_bed.cv.y[:, 2:end] - V.cv.y[:, 1:end-1] * ω_bed.cv.y[:, 1:end-1]) / dy
 
-    @. ∇V.v = (V.cv.x[2:end, :] - V.cv.x[1:end-1, :]) / dx +
-              (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy
+    @. ∇V.v = (V.cv.x[2:end, :] * ω_bed.cv.x[2:end, :] - V.cv.x[1:end-1, :] * ω_bed.cv.x[1:end-1, :]) / dx +
+              (V.vc.y[:, 2:end] * ω_bed.vc.y[:, 2:end] - V.vc.y[:, 1:end-1] * ω_bed.vc.y[:, 1:end-1]) / dy
 
-    @. ∇V.c[2:end-1, 2:end-1] *= ω_air.vc.x[2:end, 2:end-1] * ω_air.vc.x[1:end-1, 2:end-1] * ω_air.cv.y[2:end-1, 2:end] * ω_air.cv.y[2:end-1, 1:end-1]
-    @. ∇V.v[2:end-1, 2:end-1] *= ω_air.cv.x[2:end, 2:end-1] * ω_air.cv.x[1:end-1, 2:end-1] * ω_air.vc.y[2:end-1, 2:end] * ω_air.vc.y[2:end-1, 1:end-1]
-    @. ∇V.c[2:end-1, [1, end]] *= ω_air.vc.x[2:end, [1, end]] * ω_air.vc.x[1:end-1, [1, end]] * ω_air.cv.y[2:end-1, [1, end]]
-    @. ∇V.v[2:end-1, [1, end]] *= ω_air.cv.x[2:end, [1, end]] * ω_air.cv.x[1:end-1, [1, end]] * ω_air.vc.y[2:end-1, [1, end]]
-    @. ∇V.c[[1, end], 2:end-1] *= ω_air.vc.x[[1, end], 2:end-1] * ω_air.cv.y[[1, end], 2:end] * ω_air.cv.y[[1, end], 1:end-1]
-    @. ∇V.v[[1, end], 2:end-1] *= ω_air.cv.x[[1, end], 2:end-1] * ω_air.vc.y[[1, end], 2:end] * ω_air.vc.y[[1, end], 1:end-1]
-    @. ∇V.c[[1, end], [1, end]] *= ω_air.vc.x[[1, end], [1, end]] * ω_air.cv.y[[1, end], [1, end]] 
-    @. ∇V.v[[1, end], [1, end]] *= ω_air.cv.x[[1, end], [1, end]] * ω_air.vc.y[[1, end], [1, end]] 
+    # @. ∇V.c[2:end-1, 2:end-1] *= ω_air.vc.x[2:end, 2:end-1] * ω_air.vc.x[1:end-1, 2:end-1] * ω_air.cv.y[2:end-1, 2:end] * ω_air.cv.y[2:end-1, 1:end-1]
+    # @. ∇V.v[2:end-1, 2:end-1] *= ω_air.cv.x[2:end, 2:end-1] * ω_air.cv.x[1:end-1, 2:end-1] * ω_air.vc.y[2:end-1, 2:end] * ω_air.vc.y[2:end-1, 1:end-1]
+    # @. ∇V.c[2:end-1, [1, end]] *= ω_air.vc.x[2:end, [1, end]] * ω_air.vc.x[1:end-1, [1, end]] * ω_air.cv.y[2:end-1, [1, end]]
+    # @. ∇V.v[2:end-1, [1, end]] *= ω_air.cv.x[2:end, [1, end]] * ω_air.cv.x[1:end-1, [1, end]] * ω_air.vc.y[2:end-1, [1, end]]
+    # @. ∇V.c[[1, end], 2:end-1] *= ω_air.vc.x[[1, end], 2:end-1] * ω_air.cv.y[[1, end], 2:end] * ω_air.cv.y[[1, end], 1:end-1]
+    # @. ∇V.v[[1, end], 2:end-1] *= ω_air.cv.x[[1, end], 2:end-1] * ω_air.vc.y[[1, end], 2:end] * ω_air.vc.y[[1, end], 1:end-1]
+    # @. ∇V.c[[1, end], [1, end]] *= ω_air.vc.x[[1, end], [1, end]] * ω_air.cv.y[[1, end], [1, end]]
+    # @. ∇V.v[[1, end], [1, end]] *= ω_air.cv.x[[1, end], [1, end]] * ω_air.vc.y[[1, end], [1, end]]
 
     # compute pressure
     @. P.c = P_old.c - γ * ∇V.c
     @. P.v = P_old.v - γ * ∇V.v
 
     # compute deviatoric strain rates
-    @. ε̇.c.xx = (V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx
-    @. ε̇.c.yy = (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
-    @. ε̇.c.xy[2:end-1, 2:end-1] = 0.5 * ((V.cv.x[2:end-1, 2:end] - V.cv.x[2:end-1, 1:end-1]) / dy +
-                                          (V.vc.y[2:end, 2:end-1] - V.vc.y[1:end-1, 2:end-1]) / dx)
+    @. ε̇.c.xx = (V.vc.x[2:end, :] * ω_bed.vc.x[2:end, :] - V.vc.x[1:end-1, :] * ω_bed.vc.x[1:end-1, :]) / dx
+    @. ε̇.c.yy = (V.cv.y[:, 2:end] * ω_bed.cv.y[:, 2:end] - V.cv.y[:, 1:end-1] * ω_bed.cv.y[:, 1:end-1]) / dy
+    @. ε̇.c.xy[2:end-1, 2:end-1] = 0.5 * ((V.cv.x[2:end-1, 2:end] * ω_bed.cv.x[2:end-1, 2:end] - V.cv.x[2:end-1, 1:end-1] * ω_bed.cv.x[2:end-1, 1:end-1]) / dy +
+                                          (V.vc.y[2:end, 2:end-1] * ω_bed.vc.y[2:end, 2:end-1] - V.vc.y[1:end-1, 2:end-1] * ω_bed.vc.y[1:end-1, 2:end-1]) / dx)
 
-    @. ε̇.v.xx = (V.cv.x[2:end, :] - V.cv.x[1:end-1, :]) / dx
-    @. ε̇.v.yy = (V.vc.y[:, 2:end] - V.vc.y[:, 1:end-1]) / dy
-    @. ε̇.v.xy[2:end-1, 2:end-1] = 0.5 * ((V.vc.x[2:end-1, 2:end] - V.vc.x[2:end-1, 1:end-1]) / dy +
-                                          (V.cv.y[2:end, 2:end-1] - V.cv.y[1:end-1, 2:end-1]) / dx)
+    @. ε̇.v.xx = (V.cv.x[2:end, :] * ω_bed.cv.x[2:end, :] - V.cv.x[1:end-1, :] * ω_bed.cv.x[1:end-1, :]) / dx
+    @. ε̇.v.yy = (V.vc.y[:, 2:end] * ω_bed.vc.y[:, 2:end] - V.vc.y[:, 1:end-1] * ω_bed.vc.y[:, 1:end-1]) / dy
+    @. ε̇.v.xy[2:end-1, 2:end-1] = 0.5 * ((V.vc.x[2:end-1, 2:end] * ω_bed.vc.x[2:end-1, 2:end] - V.vc.x[2:end-1, 1:end-1] * ω_bed.vc.x[2:end-1, 1:end-1]) / dy +
+                                          (V.cv.y[2:end, 2:end-1] * ω_bed.cv.y[2:end, 2:end-1] - V.cv.y[1:end-1, 2:end-1] * ω_bed.cv.y[1:end-1, 2:end-1]) / dx)
 
     # compute deviatoric stress
     @. τ.c.xx = 2 * η.c[2:end-1, 2:end-1] * ε̇.c.xx
@@ -104,29 +105,29 @@ end
     @. τ.v.yy = 2 * η.v * ε̇.v.yy
     @. τ.v.xy[2:end-1, 2:end-1] = 2 * η.v[2:end-1, 2:end-1] * ε̇.v.xy[2:end-1, 2:end-1]
 
-    @. R.vc.x = (P.c[2:end, :] * ω_air.c[3:end-1, 2:end-1] - P.c[1:end-1, :] * ω_air.c[2:end-2, 2:end-1]) / dx -
-                (τ.c.xx[2:end, :] * ω_air.c[3:end-1, 2:end-1] - τ.c.xx[1:end-1, :] * ω_air.c[2:end-2, 2:end-1]) / dx -
-                (τ.v.xy[2:end-1, 2:end] * ω_air.v[2:end-1, 2:end] - τ.v.xy[2:end-1, 1:end-1] * ω_air.v[2:end-1, 1:end-1]) / dy +
-                ρg.vc.x * ω_air.vc.x
-    @. R.cv.y = (P.c[:, 2:end] * ω_air.c[2:end-1, 3:end-1] - P.c[:, 1:end-1] * ω_air.c[2:end-1, 2:end-2]) / dy -
-                (τ.c.yy[:, 2:end] * ω_air.c[2:end-1, 3:end-1] - τ.c.yy[:, 1:end-1] * ω_air.c[2:end-1, 2:end-2]) / dy -
-                (τ.v.xy[2:end, 2:end-1] * ω_air.v[2:end, 2:end-1] - τ.v.xy[1:end-1, 2:end-1] * ω_air.v[1:end-1, 2:end-1]) / dx +
-                ρg.cv.y * ω_air.cv.y
+    @. R.vc.x = ((P.c[2:end, :] * ω_air.c[3:end-1, 2:end-1] - P.c[1:end-1, :] * ω_air.c[2:end-2, 2:end-1]) / dx -
+                 (τ.c.xx[2:end, :] * ω_air.c[3:end-1, 2:end-1] - τ.c.xx[1:end-1, :] * ω_air.c[2:end-2, 2:end-1]) / dx -
+                 (τ.v.xy[2:end-1, 2:end] * ω_air.v[2:end-1, 2:end] - τ.v.xy[2:end-1, 1:end-1] * ω_air.v[2:end-1, 1:end-1]) / dy +
+                 ρg.vc.x * ω_air.vc.x) * ω_bed.vc.x[2:end-1, :]
+    @. R.cv.y = ((P.c[:, 2:end] * ω_air.c[2:end-1, 3:end-1] - P.c[:, 1:end-1] * ω_air.c[2:end-1, 2:end-2]) / dy -
+                 (τ.c.yy[:, 2:end] * ω_air.c[2:end-1, 3:end-1] - τ.c.yy[:, 1:end-1] * ω_air.c[2:end-1, 2:end-2]) / dy -
+                 (τ.v.xy[2:end, 2:end-1] * ω_air.v[2:end, 2:end-1] - τ.v.xy[1:end-1, 2:end-1] * ω_air.v[1:end-1, 2:end-1]) / dx +
+                 ρg.cv.y * ω_air.cv.y) * ω_bed.cv.y[:, 2:end-1]
 
-    @. R.cv.x = (P.v[2:end, :] * ω_air.v[2:end, :] - P.v[1:end-1, :] * ω_air.v[1:end-1, :]) / dx -
-                (τ.v.xx[2:end, :] * ω_air.v[2:end, :] - τ.v.xx[1:end-1, :] * ω_air.v[1:end-1, :]) / dx -
-                (τ.c.xy[2:end-1, 2:end] * ω_air.c[2:end-1, 2:end] - τ.c.xy[2:end-1, 1:end-1] * ω_air.c[2:end-1, 1:end-1]) / dy +
-                ρg.cv.x * ω_air.cv.x
+    @. R.cv.x = ((P.v[2:end, :] * ω_air.v[2:end, :] - P.v[1:end-1, :] * ω_air.v[1:end-1, :]) / dx -
+                 (τ.v.xx[2:end, :] * ω_air.v[2:end, :] - τ.v.xx[1:end-1, :] * ω_air.v[1:end-1, :]) / dx -
+                 (τ.c.xy[2:end-1, 2:end] * ω_air.c[2:end-1, 2:end] - τ.c.xy[2:end-1, 1:end-1] * ω_air.c[2:end-1, 1:end-1]) / dy +
+                 ρg.cv.x * ω_air.cv.x) * ω_bed.cv.x[2:end-1, :]
 
-    @. R.vc.y = (P.v[:, 2:end] * ω_air.v[:, 2:end] - P.v[:, 1:end-1] * ω_air.v[:, 1:end-1]) / dy -
-                (τ.v.yy[:, 2:end] * ω_air.v[:, 2:end] - τ.v.yy[:, 1:end-1] * ω_air.v[:, 1:end-1]) / dy -
-                (τ.c.xy[2:end, 2:end-1] * ω_air.c[2:end, 2:end-1] - τ.c.xy[1:end-1, 2:end-1] * ω_air.c[1:end-1, 2:end-1]) / dx +
-                ρg.vc.y * ω_air.vc.y
+    @. R.vc.y = ((P.v[:, 2:end] * ω_air.v[:, 2:end] - P.v[:, 1:end-1] * ω_air.v[:, 1:end-1]) / dy -
+                 (τ.v.yy[:, 2:end] * ω_air.v[:, 2:end] - τ.v.yy[:, 1:end-1] * ω_air.v[:, 1:end-1]) / dy -
+                 (τ.c.xy[2:end, 2:end-1] * ω_air.c[2:end, 2:end-1] - τ.c.xy[1:end-1, 2:end-1] * ω_air.c[1:end-1, 2:end-1]) / dx +
+                 ρg.vc.y * ω_air.vc.y) * ω_bed.vc.y[:, 2:end-1]
 
-    @. R.vc.x *= ω_bed.vc.x[2:end-1, :]
-    @. R.cv.y *= ω_bed.cv.y[:, 2:end-1]
-    @. R.cv.x *= ω_bed.cv.x[2:end-1, :]
-    @. R.vc.y *= ω_bed.vc.y[:, 2:end-1]
+    # @. R.vc.x *= ω_bed.vc.x[2:end-1, :]
+    # @. R.cv.y *= ω_bed.cv.y[:, 2:end-1]
+    # @. R.cv.x *= ω_bed.cv.x[2:end-1, :]
+    # @. R.vc.y *= ω_bed.vc.y[:, 2:end-1]
 
     return
 end
@@ -198,7 +199,7 @@ end
 
 function smoothincf(x, y, xi, yi, ri, w, Ai, Ab)
     r = sqrt((x - xi)^2 + (y - yi)^2) - ri
-    return 0.5 * (tanh(r/w) + 1)
+    return 0.5 * (tanh(r / w) + 1)
 end
 
 @views function main()
@@ -221,11 +222,14 @@ end
     yb = 1.2ly
     rb = 1.6ly
     # numerics
-    nx, ny = 100, 100
+    nx, ny = 50, 50
     maxiter = 100nx
     ncheck = 1nx
     abstol = 1e-6
     maxiter_ph = 50
+    # maxiter = 10
+    # ncheck = 1
+    # maxiter_ph = 1
     # PH params
     γ = 1.0e1
     # preprocessing
@@ -236,10 +240,10 @@ end
     yc     = 0.5 .* (yv[1:end-1] .+ yv[2:end])
     # arrays
     # volume fractions
-    ω_air = (c  = zeros(nx + 2, ny + 2), v = zeros(nx + 1, ny + 1),
-             vc = (x=zeros(nx - 1, ny),  y=zeros(nx + 1, ny)),
-             cv = (x=zeros(nx, ny + 1),  y=zeros(nx, ny - 1)))
-    ω_bed = (c  = zeros(nx + 2, ny + 2), v = zeros(nx + 1, ny + 1),
+    ω_air = (c  = zeros(nx + 2, ny + 2), v  = zeros(nx + 1, ny + 1),
+             vc = (x=zeros(nx - 1, ny), y=zeros(nx + 1, ny)),
+             cv = (x=zeros(nx, ny + 1), y=zeros(nx, ny - 1)))
+    ω_bed = (c  = zeros(nx + 2, ny + 2), v  = zeros(nx + 1, ny + 1),
              vc = (x=zeros(nx + 1, ny), y=zeros(nx + 1, ny + 2)),
              cv = (x=zeros(nx + 2, ny + 1), y=zeros(nx, ny + 1)))
     # pressure
@@ -299,7 +303,7 @@ end
         broadcast!((x, y, _ρg) -> incf(x, y, _xi, _yi, _ri, ρgi, _ρg), ρg.vc.y, xv, yc', ρg.vc.y)
         broadcast!((x, y, _ρg) -> incf(x, y, _xi, _yi, _ri, ρgi, _ρg), ρg.cv.y, xc, yv[2:end-1]', ρg.cv.y)
     end
-    
+
     broadcast!((x, y) -> incf(x, y, xf, yf, rf, 0.0, 1.0), ω_air.c[2:end-1, 2:end-1], xc, yc')
     @. ω_air.c[[1, end], :] = ω_air.c[[2, end - 1], :]
     @. ω_air.c[:, [1, end]] = ω_air.c[:, [2, end - 1]]
@@ -317,8 +321,23 @@ end
     broadcast!((x, y) -> incf(x, y, xb, yb, rb, 1.0, 0.0), ω_bed.cv.y, xc, yv')
     broadcast!((x, y) -> incf(x, y, xb, yb, rb, 1.0, 0.0), ω_bed.cv.x[2:end-1, :], xc, yv')
     broadcast!((x, y) -> incf(x, y, xb, yb, rb, 1.0, 0.0), ω_bed.vc.y[:, 2:end-1], xv, yc')
-    @. ω_bed.cv.x[[1, end], :] = ω_bed.cv.x[[2, end-1], :]
-    @. ω_bed.vc.y[:, [1, end]] = ω_bed.vc.y[:, [1, end]]
+    @. ω_bed.cv.x[[1, end], :] = ω_bed.cv.x[[2, end - 1], :]
+    @. ω_bed.vc.y[:, [1, end]] = ω_bed.vc.y[:, [2, end - 1]]
+
+    # ω_air.c .= 1.0
+    # ω_air.v .= 1.0
+    # ω_air.vc.x .= 1.0
+    # ω_air.vc.y .= 1.0
+    # ω_air.cv.x .= 1.0
+    # ω_air.cv.y .= 1.0
+
+    # ω_bed.c .= 1.0
+    # ω_bed.v .= 1.0
+    # ω_bed.vc.x .= 1.0
+    # ω_bed.vc.y .= 1.0
+    # ω_bed.cv.x .= 1.0
+    # ω_bed.cv.y .= 1.0
+
     # plots
     fig = Figure(; size=(600, 450))
     axs = (Axis(fig[1, 1][1, 1]; aspect=DataAspect(), xlabel="x", ylabel="y", title="A"),
@@ -367,10 +386,10 @@ end
             @. D.cv.y = β * D.cv.y + Z.cv.y
 
             if iter % ncheck == 0
-                err = (maximum(abs.(R.vc.x)),
-                       maximum(abs.(R.cv.y)),
-                       maximum(abs.(R.cv.x)),
-                       maximum(abs.(R.vc.y)))
+                err = (maximum(abs.(R.vc.x .* ω_bed.vc.x[2:end-1, :])),
+                       maximum(abs.(R.cv.y .* ω_bed.cv.y[:, 2:end-1])),
+                       maximum(abs.(R.cv.x .* ω_bed.cv.x[2:end-1, :])),
+                       maximum(abs.(R.vc.y .* ω_bed.vc.y[:, 2:end-1])))
                 @printf("    iter  = %.1f × N, err = [%1.3e, %1.3e, %1.3e, %1.3e]\n", iter / nx, err...)
                 if any(!isfinite, err)
                     error("simulation failed")
@@ -378,6 +397,10 @@ end
                 if all(err .< abstol)
                     break
                 end
+
+                hms[2][3] = P.c .* ω_air.c[2:end-1, 2:end-1]
+                hms[3][3] = V.vc.y[:, 2:end-1] .* ω_bed.vc.y[:, 2:end-1]
+                display(fig)
             end
         end
 
@@ -393,8 +416,8 @@ end
             break
         end
 
-        hms[2][3] = P.c #.* ω_air.c[2:end-1, 2:end-1]
-        hms[3][3] = V.vc.y[:, 2:end-1] # .* ω_air.vc.y
+        hms[2][3] = P.c .* ω_air.c[2:end-1, 2:end-1]
+        hms[3][3] = V.vc.y[:, 2:end-1] .* ω_bed.vc.y[:, 2:end-1]
         display(fig)
     end
 
@@ -417,11 +440,13 @@ end
                     Duplicated(ε̇, ε̄),
                     Const(A), Const(η), Const(ρg), Const(ω_air), Const(ω_bed), Const(γ), Const(dx), Const(dy))
 
-    vcheck = (maximum(abs.(V̄.vc.x[2:end-1, :] .- R.vc.x).*ω_bed.vc.x[2:end-1, :]),
-              maximum(abs.(V̄.cv.y[:, 2:end-1] .- R.cv.y).*ω_bed.cv.y[:, 2:end-1]),
-              maximum(abs.(V̄.cv.x[2:end-1, :] .- R.cv.x).*ω_bed.cv.x[2:end-1, :]),
-              maximum(abs.(V̄.vc.y[:, 2:end-1] .- R.vc.y).*ω_bed.vc.y[:, 2:end-1]))
+    vcheck = (maximum(abs.(V̄.vc.x[2:end-1, :] .- R.vc.x)),
+              maximum(abs.(V̄.cv.y[:, 2:end-1] .- R.cv.y)),
+              maximum(abs.(V̄.cv.x[2:end-1, :] .- R.cv.x)),
+              maximum(abs.(V̄.vc.y[:, 2:end-1] .- R.vc.y)))
     @show vcheck
+
+    return
 end
 
 main()
