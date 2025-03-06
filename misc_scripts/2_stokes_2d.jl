@@ -219,7 +219,7 @@ end
     # free surface
     xf = 0.0lx
     yf = 1.2ly
-    rf = 1.1ly
+    rf = 1.0ly
     # bedrock
     xb = 0.0lx
     yb = 1.2ly
