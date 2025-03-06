@@ -63,11 +63,6 @@ end
     @. η.c[:, [1, end]] = η.c[:, [2, end - 1]]
     @. η.v = 0.5 * A.v^(-1)
 
-    V.vc.x[ω_bed.vc.x .== 0] .= 0.
-    V.cv.x[ω_bed.cv.x .== 0] .= 0.
-    V.cv.y[ω_bed.cv.y .== 0] .= 0.
-    V.vc.y[ω_bed.vc.y .== 0] .= 0.
-
     # compute velocity divergence
     @. ∇V.c = (V.vc.x[2:end, :] - V.vc.x[1:end-1, :]) / dx +
               (V.cv.y[:, 2:end] - V.cv.y[:, 1:end-1]) / dy
