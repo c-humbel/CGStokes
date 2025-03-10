@@ -269,23 +269,23 @@ end
         broadcast!((x, y, _ρg) -> incf(x, y, _xi, _yi, _ri, ρgi, _ρg), ρg.cv.y, xc, yv[2:end-1]', ρg.cv.y)
     end
 
-    broadcast!((x, y) -> smoothincf(x, y, xf, yf, rf, 0.25dx, 0.0, 1.0), ω_air.c[2:end-1, 2:end-1], xc, yc')
+    broadcast!((x, y) -> incf(x, y, xf, yf, rf, 0.0, 1.0), ω_air.c[2:end-1, 2:end-1], xc, yc')
     @. ω_air.c[[1, end], :] = ω_air.c[[2, end - 1], :]
     @. ω_air.c[:, [1, end]] = ω_air.c[:, [2, end - 1]]
-    broadcast!((x, y) -> smoothincf(x, y, xf, yf, rf, 0.25dx, 0.0, 1.0), ω_air.v, xv, yv')
-    broadcast!((x, y) -> smoothincf(x, y, xf, yf, rf, 0.25dx, 0.0, 1.0), ω_air.vc.x, xv[2:end-1], yc')
-    broadcast!((x, y) -> smoothincf(x, y, xf, yf, rf, 0.25dx, 0.0, 1.0), ω_air.cv.y, xc, yv[2:end-1]')
-    broadcast!((x, y) -> smoothincf(x, y, xf, yf, rf, 0.25dx, 0.0, 1.0), ω_air.cv.x, xc, yv')
-    broadcast!((x, y) -> smoothincf(x, y, xf, yf, rf, 0.25dx, 0.0, 1.0), ω_air.vc.y, xv, yc')
+    broadcast!((x, y) -> incf(x, y, xf, yf, rf, 0.0, 1.0), ω_air.v, xv, yv')
+    broadcast!((x, y) -> incf(x, y, xf, yf, rf, 0.0, 1.0), ω_air.vc.x, xv[2:end-1], yc')
+    broadcast!((x, y) -> incf(x, y, xf, yf, rf, 0.0, 1.0), ω_air.cv.y, xc, yv[2:end-1]')
+    broadcast!((x, y) -> incf(x, y, xf, yf, rf, 0.0, 1.0), ω_air.cv.x, xc, yv')
+    broadcast!((x, y) -> incf(x, y, xf, yf, rf, 0.0, 1.0), ω_air.vc.y, xv, yc')
 
-    broadcast!((x, y) -> smoothincf(x, y, xb, yb, rb, 0.25dx, 1.0, 0.0), ω_bed.c[2:end-1, 2:end-1], xc, yc')
+    broadcast!((x, y) -> incf(x, y, xb, yb, rb, 1.0, 0.0), ω_bed.c[2:end-1, 2:end-1], xc, yc')
     @. ω_bed.c[[1, end], :] = ω_bed.c[[2, end - 1], :]
     @. ω_bed.c[:, [1, end]] = ω_bed.c[:, [2, end - 1]]
-    broadcast!((x, y) -> smoothincf(x, y, xb, yb, rb, 0.25dx, 1.0, 0.0), ω_bed.v, xv, yv')
-    broadcast!((x, y) -> smoothincf(x, y, xb, yb, rb, 0.25dx, 1.0, 0.0), ω_bed.vc.x, xv, yc')
-    broadcast!((x, y) -> smoothincf(x, y, xb, yb, rb, 0.25dx, 1.0, 0.0), ω_bed.cv.y, xc, yv')
-    broadcast!((x, y) -> smoothincf(x, y, xb, yb, rb, 0.25dx, 1.0, 0.0), ω_bed.cv.x[2:end-1, :], xc, yv')
-    broadcast!((x, y) -> smoothincf(x, y, xb, yb, rb, 0.25dx, 1.0, 0.0), ω_bed.vc.y[:, 2:end-1], xv, yc')
+    broadcast!((x, y) -> incf(x, y, xb, yb, rb, 1.0, 0.0), ω_bed.v, xv, yv')
+    broadcast!((x, y) -> incf(x, y, xb, yb, rb, 1.0, 0.0), ω_bed.vc.x, xv, yc')
+    broadcast!((x, y) -> incf(x, y, xb, yb, rb, 1.0, 0.0), ω_bed.cv.y, xc, yv')
+    broadcast!((x, y) -> incf(x, y, xb, yb, rb, 1.0, 0.0), ω_bed.cv.x[2:end-1, :], xc, yv')
+    broadcast!((x, y) -> incf(x, y, xb, yb, rb, 1.0, 0.0), ω_bed.vc.y[:, 2:end-1], xv, yc')
     @. ω_bed.cv.x[[1, end], :] = ω_bed.cv.x[[2, end - 1], :]
     @. ω_bed.vc.y[:, [1, end]] = ω_bed.vc.y[:, [2, end - 1]]
 
