@@ -15,8 +15,8 @@ function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
     L_ref = 1. # reference length 
     ρg_b  = 1. # background density
 
-    # physical parameters would be: n == 3, A = (24 * 1e-25) in Glen's law, see Cuffrey and Paterson (2006), table 3.3
-    # and q = 1. + 1/n, η_avg = (24 * 1e-25) ^ (-1/n), see Schoof (2006)
+    # parameters are, using n, A from Glen's law
+    # q = 1 + 1/n, B = A ^ (-1/n) (Schoof 2006)
     B_avg = 1. 
     q = 1. + 1/3  
 
@@ -144,27 +144,28 @@ function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
     
     # compute Dv r * V̄ as Dp r * Dv p * V̄ + Dτ r * Dv τ * V̄
     function jvp_R(R̂, Q, P, P̄, P̂, τ, τ̄, τ̂, V, V̄, P₀, f, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
-        tplSet!(P̂, P)
-        tplSet!(τ̂.c, τ.c)
-        tplSet!(τ̂.v, τ.v)
         make_zero!(Q)
         make_zero!(P̄)
         make_zero!(τ̄)
+        tplSet!(P̂, P)
+        tplSet!(τ̂.c, τ.c)
+        tplSet!(τ̂.v, τ.v)
+
         autodiff(Forward, comp_P_τ!,
-                 DuplicatedNoNeed(P̂, P̄), DuplicatedNoNeed(τ̂, τ̄),
+                 Duplicated(P̂, P̄), Duplicated(τ̂, τ̄),
                  Const(P₀),
                  Duplicated(V, V̄),
-                 Const(B), Const(q), Const(ωₛ), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
+                 Const(B), Const(q), Const(ωₐ), Const(ωₛ), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
 
         autodiff(Forward, comp_R!,
                  DuplicatedNoNeed(R̂, Q),
-                 Duplicated(P, P̄), Duplicated(τ, τ̄),
-                 Const(ωₐ), Const(ωₛ), Const(f), Const(iΔx), Const(iΔy))
+                 Duplicated(P̂, P̄), Duplicated(τ̂, τ̄),
+                 Const(f), Const(ωₐ), Const(ωₛ), Const(iΔx), Const(iΔy))
         return nothing
     end
 
     # function to compute the preconditioner
-    # overwrites invM, P̄, τ̄, V̄, Q, potentially recomputes R, P, τ
+    # overwrites invM, V̄, Q
     function initialise_invM!(invM, R̂, Q, P, P̄, P̂, τ, τ̄, τ̂, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
         for (i, I) = enumerate(eachindex(invM))
             set_one!(V̄, true, i)
@@ -179,7 +180,6 @@ function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
         return nothing
     end
 
-
     # Powell Hestenes
     it = 0
     while it < niter && ν > ϵ_ph
@@ -187,7 +187,7 @@ function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
         tplSet!(P₀, P)
 
         # r = f - div τ + grad p - grad( div v)
-        comp_P_τ!(P, τ, P₀, V, B, q, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
+        comp_P_τ!(P, τ, P₀, V, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
         comp_R!(R, P, τ, f, ωₐ, ωₛ, iΔx, iΔy)
 
         χ = tplNorm(R) / χ_ref
@@ -249,13 +249,13 @@ function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
 
                 if verbose && it_cg % n == 0
                     println("CG residual = ", μ / μ_ref)
-                    plt.Pc[3][] .= Array(P.c)
-                    plt.Vx[3][] .= Array(K.xc)
-                    plt.Vy[3][] .= Array(K.yc)
-                    plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
-                    plt.Vx.colorrange[] = (min(-1e-10,minimum(K.xc)), max(1e-10,maximum(K.xc)))
-                    plt.Vy.colorrange[] = (min(-1e-10,minimum(K.yc)), max(1e-10,maximum(K.yc)))
-                    display(fig)
+                    # plt.Pc[3][] .= Array(P.c)
+                    # plt.Vx[3][] .= Array(K.xc)
+                    # plt.Vy[3][] .= Array(K.yc)
+                    # plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
+                    # plt.Vx.colorrange[] = (min(-1e-10,minimum(K.xc)), max(1e-10,maximum(K.xc)))
+                    # plt.Vy.colorrange[] = (min(-1e-10,minimum(K.yc)), max(1e-10,maximum(K.yc)))
+                    # display(fig)
                 end
 
                 # periodically check for stagnation
@@ -271,13 +271,13 @@ function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
             # find λ st. r(v - λ dv) < r(v)
             λ = 1.
             step_V!(V̄, V, dV, λ)
-            comp_P_τ!(P, τ, P₀, V, B, q, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
+            comp_P_τ!(P, τ, P₀, V, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
             comp_R!(R, P, τ, f, ωₐ, ωₛ, iΔx, iΔy)
             χ_new = tplNorm(R) / χ_ref
             while χ_new >= χ && λ > 1e-3
                 λ /= MathConstants.golden
                 step_V!(V̄, V, dV, λ)
-                comp_P_τ!(P, τ, P₀, V, B, q, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
+                comp_P_τ!(P, τ, P₀, V, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
                 comp_R!(R, P, τ, f, ωₐ, ωₛ, iΔx, iΔy)
                 χ_new = tplNorm(R) / χ_ref
             end
@@ -303,7 +303,7 @@ function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
             
             println("Newton residual = ", χ, "; λ = ", λ, "; total iteration count: ", it)
         end    
-        comp_divV!(divV, V, ωₛ, iΔx, iΔy)
+        comp_divV!(divV, V,  ωₐ, ωₛ, iΔx, iΔy)
         ν = tplNorm(divV) / tplNorm(P)
         println("Pressure residual = ", ν, ", Newton residual = ", χ, ", CG residual = ", δ)
      end
@@ -312,5 +312,5 @@ function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
 end
 
 n = 62
-nonlinear_inclusion(n=n, γ_factor=100., niter=1000, ϵ_ph=1e-5, ϵ_cg=1e-5, ϵ_newton=1e-5, freq_recompute=100, verbose=true);
+nonlinear_inclusion(n=n, γ_factor=1000., niter=1000n, ϵ_ph=1e-5, ϵ_cg=1e-5, ϵ_newton=1e-5, freq_recompute=100, verbose=false);
 
