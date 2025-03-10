@@ -318,19 +318,19 @@ end
 
 @kernel inbounds=true function compute_K!(K, R, Q)
     i, j = @index(Global, NTuple)
-    if i <= size(K.xc, 1) && j <= size(K.xc, 2)
+    if 1 < i < size(K.xc, 1) && j <= size(K.xc, 2)
         K.xc[i, j] = R.xc[i, j] - Q.xc[i, j]
     end
 
-    if i <= size(K.yc, 1) && j <= size(K.yc, 2)
+    if i <= size(K.yc, 1) && 1 < j < size(K.yc, 2)
         K.yc[i, j] = R.yc[i, j] - Q.yc[i, j]
     end
 
-    if i <= size(K.xv, 1) && j <= size(K.xv, 2)
+    if 1 < i < size(K.xv, 1) && j <= size(K.xv, 2)
         K.xv[i, j] = R.xv[i, j] - Q.xv[i, j]
     end
 
-    if i <= size(K.yv, 1) && j <= size(K.yv, 2)
+    if i <= size(K.yv, 1) && 1 < j < size(K.yv, 2)
         K.yv[i, j] = R.yv[i, j] - Q.yv[i, j]
     end
 end
@@ -357,19 +357,19 @@ end
 
 @kernel inbounds=true function try_step_V!(V̄, V, dV, λ)
     i, j = @index(Global, NTuple)
-    if i <= size(V̄.xc, 1) && j <= size(V̄.xc, 2)
+    if 1 < i < size(V̄.xc, 1) && j <= size(V̄.xc, 2)
         V̄.xc[i, j] = V.xc[i, j] - λ * dV.xc[i, j]
     end
 
-    if i <= size(V̄.yc, 1) && j <= size(V̄.yc, 2)
+    if i <= size(V̄.yc, 1) && 1 < j < size(V̄.yc, 2)
         V̄.yc[i, j] = V.yc[i, j] - λ * dV.yc[i, j]
     end
 
-    if i <= size(V̄.xv, 1) && j <= size(V̄.xv, 2)
+    if 1 < i < size(V̄.xv, 1) && j <= size(V̄.xv, 2)
         V̄.xv[i, j] = V.xv[i, j] - λ * dV.xv[i, j]
     end
 
-    if i <= size(V̄.yv, 1) && j <= size(V̄.yv, 2)
+    if i <= size(V̄.yv, 1) && 1 < j < size(V̄.yv, 2)
         V̄.yv[i, j] = V.yv[i, j] - λ * dV.yv[i, j]
     end
 
@@ -378,19 +378,19 @@ end
 
 @kernel inbounds=true function initialise_D!(D, K, invM)
     i, j = @index(Global, NTuple)
-    if i <= size(D.xc, 1) && j <= size(D.xc, 2)
+    if 1 < i < size(D.xc, 1) && j <= size(D.xc, 2)
         D.xc[i, j] = invM.xc[i, j] * K.xc[i, j]
     end
 
-    if i <= size(D.yc, 1) && j <= size(D.yc, 2)
+    if i <= size(D.yc, 1) && 1 < j < size(D.yc, 2)
         D.yc[i, j] = invM.yc[i, j] * K.yc[i, j]
     end
 
-    if i <= size(D.xv, 1) && j <= size(D.xv, 2)
+    if 1 < i < size(D.xv, 1) && j <= size(D.xv, 2)
         D.xv[i, j] = invM.xv[i, j] * K.xv[i, j]
     end
 
-    if i <= size(D.yv, 1) && j <= size(D.yv, 2)
+    if i <= size(D.yv, 1) && 1 < j < size(D.yv, 2)
         D.yv[i, j] = invM.yv[i, j] * K.yv[i, j]
     end
 end
