@@ -60,7 +60,7 @@ end
                                           (V.cv.y[2:end, 2:end-1] * ω_bed.cv.y[2:end, 2:end-1] - V.cv.y[1:end-1, 2:end-1] * ω_bed.cv.y[1:end-1, 2:end-1]) / dx)
 
     # compute effective viscosity
-    @. η.c[2:end-1, 2:end-1] = 0.5* B * (0.5 * (ε̇.c.xx^2 + ε̇.c.yy^2) + ε̇.c.xy[2:end-1, 2:end-1]^2 + ε̇bg^2)^((p - 2) / 2)
+    @. η.c[2:end-1, 2:end-1] = 0.5 * B * (0.5 * (ε̇.c.xx^2 + ε̇.c.yy^2) + ε̇.c.xy[2:end-1, 2:end-1]^2 + ε̇bg^2)^((p - 2) / 2)
     @. η.c[[1, end], :] = η.c[[2, end - 1], :]
     @. η.c[:, [1, end]] = η.c[:, [2, end - 1]]
     @. η.v = 0.5 * B * (0.5 * (ε̇.v.xx^2 + ε̇.v.yy^2) + ε̇.v.xy^2 + ε̇bg^2)^((p - 2) / 2)
@@ -191,7 +191,7 @@ end
     yb = 1.2ly
     rb = 1.6ly
     # numerics
-    nx, ny = 50, 50
+    nx, ny     = 50, 50
     maxiter    = 100nx
     ncheck     = 1nx
     maxiter_ph = 50
