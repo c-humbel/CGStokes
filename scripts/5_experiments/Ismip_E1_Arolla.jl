@@ -288,8 +288,8 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
     return P, V, ωₐ, ωₛ, xc, yc, itercounts, res_newton
 end
 
-n = 254
-P, V, ωₐ, ωₛ, xc, yc, itercounts, res_newton = run("../Examples/ismip_arolla_100.txt";
+n = 100
+P, V, ωₐ, ωₛ, xc, yc, itercounts, res_newton = run("data/arolla100.dat";
                                                   n=n, aspect=0.3,
                                                   γ_factor=1e8, niter=500n,
                                                   ϵ_ph=1e-8, ϵ_cg=1e-10, ϵ_newton=1e-8,
