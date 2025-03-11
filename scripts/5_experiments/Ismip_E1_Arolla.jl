@@ -2,91 +2,110 @@ using CairoMakie
 using ColorSchemes
 using Enzyme
 using KernelAbstractions
-using Random
 using CUDA
+using DelimitedFiles
+using Interpolations
 
 include("../../src/tuple_manip.jl")
-include("kernels_free_slip.jl")
-include("kernels_volume_fractions.jl")
+include("../4_nonlinear_augmLagrange/kernels_free_slip.jl")
+include("../4_nonlinear_augmLagrange/kernels_volume_fractions.jl")
 
-function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
-                            ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, freq_recompute=100,
-                            backend=CPU(), workgroup=64, type=Float64, verbose=false)
-    L_ref = 1. # reference length 
-    ρg_b  = 1. # background density
 
-    # parameters are, using n, A from Glen's law
-    # q = 1 + 1/n, B = A ^ (-1/n) (Schoof 2006)
-    B_avg = 1. 
-    q = 1. + 1/3  
+function setup_arolla(nx::Int, aspect_ratio, filepath, backend)
+    # data from https://frank.pattyn.web.ulb.be/ismip/welcome.html#Input
+    data, _ = readdlm(filepath, '\t', Float64, header=true)
+    x_max = maximum(data[:, 1])
+    x_min = minimum(data[:, 1])
+    Lx    = x_max - x_min
+    y_max = maximum(data[:, 2:3])
+    y_min = minimum(data[:, 2:3])
+    Ly    = y_max - y_min
 
-    Lx = Ly = L_ref
+    # grid spacing, centers should be at x coordinates from data
+    Δx = Lx / (nx - 1)
+    ny = round(Int, Ly / (Δx * aspect_ratio)) + 1
+    Δy = Ly / (ny - 1)
+    # coodrindates of grid centers & vertices
+    xc = LinRange(x_min, x_max, nx)
+    yc = LinRange(y_min, y_max, ny)
+    xv = LinRange(x_min - 0.5Δx, x_max + 0.5Δx, nx+1)
+    yv = LinRange(y_min - 0.5Δy, y_max + 0.5Δy, ny+1)
 
-    rₐ = 1.6Lx
-    rₛ = 0.9Ly
-    x₀ = 0
-    y₀ = -1.2Ly
-    ri  = [0.1Lx, 0.15Lx, 0.2Lx]
-    xi  = [-0.3Lx, 0.0Lx, 0.2Ly]
-    yi  = [-0.3Ly, 0.2Ly, -0.2Ly]
-    ρgi = [0.0, 0.0, 0.0]
-    nx = ny = n
+
+    ωₐ = (c=KernelAbstractions.zeros(backend, Float64, nx+2, ny+2),
+           v=KernelAbstractions.zeros(backend, Float64, nx+1, ny+1),
+           xc=KernelAbstractions.zeros(backend, Float64, nx+1, ny),
+           yc=KernelAbstractions.zeros(backend, Float64, nx, ny+1),
+           xv=KernelAbstractions.zeros(backend, Float64, nx+2, ny+1),
+           yv=KernelAbstractions.zeros(backend, Float64, nx+1, ny+2))
+    ωₛ = deepcopy(ωₐ)
+
+    # compute volume fractions
+    fₐ = extrapolate(interpolate!((data[:, 1],), data[:, 3], Gridded(Linear())), Flat())
+    fₛ = extrapolate(interpolate!((data[:, 1],), data[:, 2], Gridded(Linear())), Flat())
+    initialise_volume_fractions_from_function!(ωₐ, fₐ, xc, yc, xv, yv, 1., 0.)
+    initialise_volume_fractions_from_function!(ωₛ, fₛ, xc, yc, xv, yv, 0., 1.)
+    return Lx, Ly, nx, ny, Δx, Δy, xc, yc, xv, yv, ωₐ, ωₛ
+end
+
+
+    
+
+function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
+            ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, freq_recompute=100,
+            backend=CPU(), workgroup=64, Float64=Float64, verbose=false)
+
+    # parameters from ISMIP, transformation according to Schoof (2006)
+    ρgy   = 9.81 * 910.
+    A_val = 1e-16 / 31556926.
+    n_exp = 3.
+    B_val = A_val^(-1/n_exp)
+    q     = 1. + 1/n_exp 
+
+    # numerical parameters
     ϵ̇_bg = eps()
+    γ    = γ_factor
 
-    Δx,  Δy  = Lx / nx, Ly / ny
+   
+    # setup test case
+    Lx, Ly, nx, ny, Δx, Δy, xc, yc, xv, yv, ωₐ, ωₛ = setup_arolla(n, aspect, filepath, backend)
+
     iΔx, iΔy = inv(Δx), inv(Δy)
-    xc = LinRange(-0.5Lx + 0.5Δx, 0.5Lx - 0.5Δx, nx)
-    yc = LinRange(-0.5Ly + 0.5Δy, 0.5Ly - 0.5Δy, ny)
-    xv = LinRange(-0.5Lx, 0.5Lx, nx+1)
-    yv = LinRange(-0.5Ly, 0.5Ly, ny+1)
 
-
-    # field initialisation
-    P    = (c=KernelAbstractions.zeros(backend, type, nx, ny),
-            v=KernelAbstractions.zeros(backend, type, nx+1, ny+1))
+    # field creation
+    P    = (c=KernelAbstractions.zeros(backend, Float64, nx, ny),
+            v=KernelAbstractions.zeros(backend, Float64, nx+1, ny+1))
     P₀   = deepcopy(P)  # old pressure
     P̄    = deepcopy(P)  # memory needed for auto-differentiation
+    P̂    = deepcopy(P)
     divV = deepcopy(P)  # velocity divergence
     B    = deepcopy(P)  # prefactor of constituitive relation
-    # ϵ̇_E  = deepcopy(P)  # squared invariant of strain rate
-    τ    = (c=(xx=KernelAbstractions.zeros(backend, type, nx  , ny  ),
-               yy=KernelAbstractions.zeros(backend, type, nx  , ny  ),
-               xy=KernelAbstractions.zeros(backend, type, nx+2, ny+2)),
-            v=(xx=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
-               yy=KernelAbstractions.zeros(backend, type, nx+1, ny+1),
-               xy=KernelAbstractions.zeros(backend, type, nx+1, ny+1)))  # deviatoric stress tensor
+    τ    = (c=(xx=KernelAbstractions.zeros(backend, Float64, nx  , ny  ),
+               yy=KernelAbstractions.zeros(backend, Float64, nx  , ny  ),
+               xy=KernelAbstractions.zeros(backend, Float64, nx+2, ny+2)),
+            v=(xx=KernelAbstractions.zeros(backend, Float64, nx+1, ny+1),
+               yy=KernelAbstractions.zeros(backend, Float64, nx+1, ny+1),
+               xy=KernelAbstractions.zeros(backend, Float64, nx+1, ny+1)))  # deviatoric stress tensor
     τ̄    = deepcopy(τ)
-    V    = (xc=KernelAbstractions.zeros(backend, type, nx+1, ny),
-            yc=KernelAbstractions.zeros(backend, type, nx, ny+1),
-            xv=KernelAbstractions.zeros(backend, type, nx+2, ny+1),
-            yv=KernelAbstractions.zeros(backend, type, nx+1, ny+2))
+    τ̂    = deepcopy(τ)
+    V    = (xc=KernelAbstractions.zeros(backend, Float64, nx+1, ny),
+            yc=KernelAbstractions.zeros(backend, Float64, nx, ny+1),
+            xv=KernelAbstractions.zeros(backend, Float64, nx+2, ny+1),
+            yv=KernelAbstractions.zeros(backend, Float64, nx+1, ny+2))
     dV   = deepcopy(V)  # velocity updates in Newton iteration
     V̄    = deepcopy(V)  # memory needed for auto-differentiation
     D    = deepcopy(V)  # search direction of CG, cells affecting Dirichlet BC are zero
     R    = deepcopy(V)  # nonlinear Residual
     K    = deepcopy(V)  # Residuals in CG
     Q    = deepcopy(V)  # Jacobian of compute_R wrt. V, multiplied by some vector (used for autodiff)
+    R̂    = deepcopy(V)
     invM = deepcopy(V)  # preconditioner, cells correspoinding to Dirichlet BC are zero
     f    = deepcopy(V)  # body force
-    ωₐ   = (c =KernelAbstractions.zeros(backend, type, nx+2, ny+2),
-            v =KernelAbstractions.zeros(backend, type, nx+1, ny+1),
-            xc=KernelAbstractions.zeros(backend, type, nx+1, ny),
-            yc=KernelAbstractions.zeros(backend, type, nx, ny+1),
-            xv=KernelAbstractions.zeros(backend, type, nx+2, ny+1),
-            yv=KernelAbstractions.zeros(backend, type, nx+1, ny+2))
-    ωₛ   = deepcopy(ωₐ)
 
-    R̂    = deepcopy(V)
-    P̂    = deepcopy(P)
-    τ̂    = deepcopy(τ)
-
-    initialise_volume_fractions_ring_segment!(ωₐ, ωₛ,  x₀, y₀, rₐ, rₛ, xc, yc, xv, yv)
-    initialise_f_inclusions!(f, xi, yi, ri, ρgi, ρg_b, xc, yc, xv, yv)
-
-    tplFill!(B, B_avg)
-
-    γ = γ_factor
-
+    #  field initialisation
+    tplFill!(B, B_val)
+    fill!(f.yc, ρgy)
+    fill!(f.yv, ρgy)
 
     # residual norms for monitoring convergence
     δ = Inf # CG
@@ -99,31 +118,6 @@ function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
     # visualisation
     itercounts = []
     res_newton = []
-
-    fig = Figure(size=(800,900))
-    axs = (ρg=Axis(fig[1,1][1,1], aspect=1, title="ρg"),
-           ω =Axis(fig[1,2][1,1], aspect=1, title="volume fractions"),
-           Vx=Axis(fig[2,1][1,1], aspect=1, title="horizontal velocity"),
-           Vy=Axis(fig[2,2][1,1], aspect=1, title="vertical velocity"),
-           Pc=Axis(fig[3,1][1,1], aspect=1, title="pressure"),
-           Er=Axis(fig[3,2][1,1], title="Convergence of Newton Method", xlabel="iterations / nx", ylabel="residual norm")
-           )
-
-    plt = (ρg=heatmap!(axs.ρg, Array(f.yc), colormap=ColorSchemes.viridis),
-           ω =heatmap!(axs.ω , Array(ωₐ.c .* ωₛ.c), colormap=:greys),
-           Vx=heatmap!(axs.Vx, Array(V.xc), colormap=ColorSchemes.viridis),
-           Vy=heatmap!(axs.Vy, Array(V.yc), colormap=ColorSchemes.viridis),
-           Pc=heatmap!(axs.Pc, Array(P.c), colormap=ColorSchemes.viridis),
-           )
-
-    cbar= (ρg=Colorbar(fig[1, 1][1, 2], plt.ρg),
-           ω =Colorbar(fig[1, 2][1, 2], plt.ω),
-           Pc=Colorbar(fig[3, 1][1, 2], plt.Pc),
-           Vx=Colorbar(fig[2, 1][1, 2], plt.Vx),
-           Vy=Colorbar(fig[2, 2][1, 2], plt.Vy)
-           )
-
-    display(fig)
 
     # create Kernels
     up_D!      = update_D!(backend, workgroup, (nx+2, ny+2))
@@ -180,6 +174,9 @@ function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
         return nothing
     end
 
+    # start timer
+    verbose && println("start computation")
+    t_init = Base.time()
     # Powell Hestenes
     it = 0
     while it < niter && ν > ϵ_ph
@@ -248,21 +245,14 @@ function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
                 it += 1
 
                 if verbose && it_cg % n == 0
-                    println("CG residual = ", μ / μ_ref)
-                    # plt.Pc[3][] .= Array(P.c)
-                    # plt.Vx[3][] .= Array(K.xc)
-                    # plt.Vy[3][] .= Array(K.yc)
-                    # plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
-                    # plt.Vx.colorrange[] = (min(-1e-10,minimum(K.xc)), max(1e-10,maximum(K.xc)))
-                    # plt.Vy.colorrange[] = (min(-1e-10,minimum(K.yc)), max(1e-10,maximum(K.yc)))
-                    # display(fig)
+                    println("CG residual, μ = ", μ / μ_ref, ", δ = ", δ)
+
                 end
 
                 # periodically check for stagnation
                 if it_cg % freq_recompute == 0
                     δ = α * tplNorm(D) / tplNorm(dV) 
                     if δ < ϵ_cg
-                        println("GC relative update: ", δ)
                         break
                     end
                 end
@@ -286,31 +276,69 @@ function nonlinear_inclusion(;n=126, niter=10000, γ_factor=1.,
  
             push!(itercounts, it)
             push!(res_newton, χ)
-
-            # update plot
-            plt.Pc[3][] .= Array(P.c)
-            plt.Vx[3][] .= Array(V.xc)
-            plt.Vy[3][] .= Array(V.yc)
-            # plt.Sr[3][] .= log10.(Array(ϵ̇_E.c))
-            plt.Pc.colorrange[] = (min(-1e-10,minimum(P.c )), max(1e-10,maximum(P.c )))
-            plt.Vx.colorrange[] = (min(-1e-10,minimum(V.xc)), max(1e-10,maximum(V.xc)))
-            plt.Vy.colorrange[] = (min(-1e-10,minimum(V.yc)), max(1e-10,maximum(V.yc)))
-            # plt.Sr.colorrange[] = (min(-1,log10(minimum(ϵ̇_E.c))), max(1,log10(maximum(ϵ̇_E.c))))
-
-            scatterlines!(axs.Er, itercounts ./ nx, log10.(res_newton), color=:purple)
-
-            display(fig)
             
-            println("Newton residual = ", χ, "; λ = ", λ, "; total iteration count: ", it)
+            verbose && println("Newton residual = ", χ, "; λ = ", λ, "; total iteration count: ", round(Int, it / nx), "nx")
         end    
         comp_divV!(divV, V,  ωₐ, ωₛ, iΔx, iΔy)
         ν = tplNorm(divV) / tplNorm(P)
-        println("Pressure residual = ", ν, ", Newton residual = ", χ, ", CG residual = ", δ)
-     end
- 
-     return it, P, V, R
+        verbose && println("Pressure residual = ", ν, ", Newton residual = ", χ, ", CG residual = ", δ)
+    end
+    Δt = Base.time() - t_init
+    verbose && println("Time elapsed: ", Δt, "s")
+    return P, V, ωₐ, ωₛ, xc, yc, itercounts, res_newton
 end
 
-n = 62
-nonlinear_inclusion(n=n, γ_factor=10., niter=2000n, ϵ_ph=1e-5, ϵ_cg=1e-5, ϵ_newton=1e-5, freq_recompute=100, verbose=false);
+n = 254
+P, V, ωₐ, ωₛ, xc, yc, itercounts, res_newton = run("../Examples/ismip_arolla_100.txt";
+                                                  n=n, aspect=0.3,
+                                                  γ_factor=1e8, niter=500n,
+                                                  ϵ_ph=1e-8, ϵ_cg=1e-10, ϵ_newton=1e-8,
+                                                  freq_recompute=100, verbose=false);
+
+
+@views function surface_velocity(ωac, ωsc, Vm)
+# dimensions: ω = (nx+2,ny+2), Vm =(nx,ny)
+    V_surf = zeros(size(Vm, 1))
+
+    for i = axes(ωac, 1)[2: end-1]
+        j = findfirst(w -> w == 0, ωac[i, :])
+        if !isnothing(j) && ωsc[i, j] != 0
+            V_surf[i-1] = Vm[i-1, max(1,j-3)]
+        else
+            V_surf[i-1] = NaN
+        end
+    end
+
+    return V_surf
+end
+
+Pc = Array(P.c)
+Vxc = Array(V.xc)
+Vyc = Array(V.yc)
+ωsc = Array(ωₛ.c)
+ωac = Array(ωₐ.c)
+Vm  = 0.5 .* sqrt.((Vxc[2:end, :] .+ Vxc[1:end-1, :]) .^2 .+ (Vyc[:, 2:end] .+ Vyc[:, 1:end-1]) .^2)
+Vs = surface_velocity(ωac, ωsc, Vm)
+# visualisation
+fig = Figure(size=(800,1200))
+axs = (ω =Axis(fig[1,1][1,1], title="domain", xlabel="x", ylabel="y"),
+       Pc=Axis(fig[2,1][1,1], title="pressure", xlabel="x", ylabel="y"),
+       Vm=Axis(fig[3,1][1,1], title="velocity magnitude", xlabel="x", ylabel="y"),
+       Vs=Axis(fig[4,1][1,1], title="surface velocity", xlabel="x", ylabel="m/s"),
+       Er=Axis(fig[5,1][1,1], title="Convergence of Newton Method", xlabel="iterations / nx", ylabel="residual norm")
+       )
+
+plt = (ω =heatmap!(axs.ω , ωac .* ωsc, colormap=:greys),
+       Pc=heatmap!(axs.Pc, Pc, colormap=ColorSchemes.viridis),
+       Vm=heatmap!(axs.Vm, Vm, colormap=ColorSchemes.viridis),
+       Vs=scatter!(axs.Vs, xc, Vs, color=:blue),
+       Er=scatterlines!(axs.Er, itercounts ./ size(Pc, 1), log10.(res_newton), color=:purple))
+
+cbar= (ω =Colorbar(fig[1,1][1, 2], plt.ω),
+       Pc=Colorbar(fig[2,1][1, 2], plt.Pc),
+       Vm=Colorbar(fig[3,1][1, 2], plt.Vm),
+       )
+
+display(fig)
+
 

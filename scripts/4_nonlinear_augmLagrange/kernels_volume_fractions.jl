@@ -172,7 +172,20 @@ end
     return nothing
 end
 
-@views function initialise_f!(f, xi, yi, ri, ρgi, ρg_b, xc, yc, xv, yv)
+@views function initialise_volume_fractions_from_function!(ω, fun, xc, yc, xv, yv, v_below, v_above)
+    copyto!(ω.c[2:end-1, 2:end-1], [y <= fun(x) ? v_below : v_above for x=xc, y=yc])
+    ω.c[[1, end], :] .= ω.c[[2, end-1], :]
+    ω.c[:, [1, end]] .= ω.c[:, [2, end-1]]
+    copyto!(ω.v , [y <= fun(x) ? v_below : v_above  for x=xv, y=yv])
+    copyto!(ω.xc, [y <= fun(x) ? v_below : v_above  for x=xv, y=yc])
+    copyto!(ω.yc, [y <= fun(x) ? v_below : v_above  for x=xc, y=yv])
+    copyto!(ω.xv[2:end-1, :], [y <= fun(x) ? v_below : v_above  for x=xc, y=yv])
+    copyto!(ω.yv[:, 2:end-1], [y <= fun(x) ? v_below : v_above  for x=xv, y=yc])
+    ω.xv[[1, end], :] .= ω.xv[[2, end-1], :]
+    ω.yv[:, [1, end]] .= ω.yv[:, [2, end-1]]
+end
+
+@views function initialise_f_inclusions!(f, xi, yi, ri, ρgi, ρg_b, xc, yc, xv, yv)
     fill!(f.xc, 0)
     fill!(f.xv, 0)  
 
