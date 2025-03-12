@@ -81,6 +81,7 @@ function bed_stress(ωac, ωsc, τcxy)
     return τxy_bed
 end
 
+
 function postprocess_arolla(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals)
     violet, green = resample(ColorSchemes.viridis, 5)[[1, 3]]
     Pc = Array(P.c) ./ 1000 # kPa
@@ -196,7 +197,7 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
     ν_ref = B_val^(-n_exp) * ρgy^n_exp * Lx^n_exp
     χ_ref = Lx * ν_ref
 
-    γ    = γ_factor * B_val * time_ref^(2/3)
+    γ    = γ_factor * B_val * ν_ref^(-2/3)
 
 
     # visualisation
@@ -371,12 +372,13 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
     return P, V, τ, ωₐ, ωₛ, xc, yc, iter, res
 end
 
-n = 100
+n = 1000
 P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals = run("data/arolla100.dat";
                                                   n=n, aspect=0.3,
                                                   γ_factor=1e5, niter=5000n,
-                                                  ϵ_ph=1e-8, ϵ_cg=1e-10, ϵ_newton=1e-9,
-                                                  freq_recompute=50, verbose=false);
+                                                  ϵ_ph=1e-8, ϵ_cg=1e-10, ϵ_newton=1e-8,
+                                                  freq_recompute=50, verbose=true,
+                                                  backend=CUDABackend(), workgroup=(32, 8));
 
 postprocess_arolla(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals)
 
