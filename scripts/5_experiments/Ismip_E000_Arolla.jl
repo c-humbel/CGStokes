@@ -200,7 +200,7 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
     ν_ref = B_val^(-n_exp) * ρgy^n_exp * Lx^n_exp
     χ_ref = Lx * ν_ref
 
-    γ    = γ_factor * B_val * time_ref^(2/3)
+    γ    = γ_factor * B_val * ν_ref^(-2/3)
 
 
     # visualisation
