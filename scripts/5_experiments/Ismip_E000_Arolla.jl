@@ -5,6 +5,7 @@ using KernelAbstractions
 using CUDA
 using DelimitedFiles
 using Interpolations
+using JLD2
 
 include("../../src/tuple_manip.jl")
 include("../4_nonlinear_augmLagrange/kernels_free_slip.jl")
@@ -49,40 +50,33 @@ function setup_arolla(nx::Int, aspect_ratio, filepath, backend)
 end
 
 # post processsing                                                  
-function surface_velocities(ωac, ωsc, Vxv, Vyc)
-    # dimensions: ω = (nx+2,ny+2)
+function compute_boundary_properties(ωac, ωsc, Vxv, Vyc, τcxy, Pc, Δy)
+    ΔP_bed = zeros(size(Pc, 1))
+    τxy_bed = zeros(size(τcxy, 1) - 2)
     Vx_surf = zeros(size(Vyc, 1))
     Vy_surf = zeros(size(Vyc, 1))
-
-    for i = axes(ωac, 1)[2: end-1]
-        j = findlast(w -> w == 1, ωac[i, :])
-        if !isnothing(j) && ωsc[i, j] != 0
-            Vx_surf[i-1] = Vxv[i,j-1]
-            Vy_surf[i-1] = Vyc[i-1,j-1]
+    for i = eachindex(ΔP_bed)
+        j_bed = findfirst(w -> w == 1, ωsc[i+1, :])
+        j_air = findlast(w -> w == 1, ωac[i+1, :])
+        if !isnothing(j_bed) && !isnothing(j_air) && j_bed <= j_air
+            ρgh = 910 * 9.81 * Δy * (j_air - j_bed + 1) / 1000 # kPa
+            ΔP_bed[i] = Pc[i, j_bed-1] - ρgh
+            τxy_bed[i] = τcxy[i+1, j_bed]
+            Vx_surf[i] = Vxv[i+1, j_air-1]
+            Vy_surf[i] = Vyc[i, j_air-1]
         else
-            Vx_surf[i-1] = NaN
-            Vy_surf[i-1] = NaN
+            ΔP_bed[i] = NaN
+            τxy_bed[i] = NaN
+            Vx_surf[i] = NaN
+            Vy_surf[i] = NaN
         end
     end
-
-    return Vx_surf, Vy_surf
+    return Vx_surf, Vy_surf, τxy_bed, ΔP_bed
 end
 
-function bed_stress(ωac, ωsc, τcxy)
-    τxy_bed = zeros(size(τcxy, 1) - 2)
-    for i = axes(τcxy, 1)[2:end-1]
-        j = findfirst(w -> w == 1, ωsc[i, :])
-        if !isnothing(j) && ωac[i, j] != 0
-            τxy_bed[i-1] = τcxy[i, j]
-        else
-            τxy_bed[i-1] = NaN
-        end
-    end
-    return τxy_bed
-end
-
-function postprocess_arolla(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals)
-    violet, green = resample(ColorSchemes.viridis, 5)[[1, 3]]
+function extract_data(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals)
+    nx = length(xc)
+    ny = length(yc)
     Pc = Array(P.c) ./ 1000 # kPa
     Vxc = Array(V.xc) .* 31556926 # m/year
     Vxv = Array(V.xv) .* 31556926
@@ -90,14 +84,27 @@ function postprocess_arolla(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residual
     ωsc = Array(ωₛ.c)
     ωac = Array(ωₐ.c)
     τcxy = Array(τ.c.xy) ./ 1000 # kPa
+
     Vm  = 0.5 .* sqrt.((Vxc[2:end, :] .+ Vxc[1:end-1, :]) .^2 .+ (Vyc[:, 2:end] .+ Vyc[:, 1:end-1]) .^2)
-    Vxs, Vys = surface_velocities(ωac, ωsc, Vxv, Vyc)
-    τxy_bed = bed_stress(ωac, ωsc, τcxy)
+
+    Vxs, Vys, τxyb, ΔPb = compute_boundary_properties(ωac, ωsc, Vxv, Vyc, τcxy, Pc, yc[2] - yc[1])
+    writedlm("compare_arolla_$(nx)x$(ny).dat", hcat(xc ./ 5000, Vxs, Vys, τxyb, ΔPb))
+
+
     background = ωac[2:end-1, 2:end-1] .* ωsc[2:end-1, 2:end-1] .== 0
     Pc[background] .= NaN
     Vm[background] .= NaN
+
+    jldsave("raw_data_arolla_$(nx)x$(ny).jld2"; Pc, Vm, Vxc, Vyc, τcxy, ωac, ωsc, xc, yc, itercounts, residuals, compress=true)
+
+    return Pc, Vm, Vxs, Vys, τxyb, ΔPb, xc, yc, itercounts, residuals
+end
+    
+function create_summary_plots(Pc, Vm, Vxs, Vys, τxyb, ΔPb, xc, yc, itercounts, residuals; savefig=true)
+    nx = length(xc)
+    ny = length(yc)
     with_theme(theme_latexfonts()) do
-        # visualisation
+        violet, green = resample(ColorSchemes.viridis, 5)[[1, 3]]
         fig = Figure(fontsize=16,size=(800,1600))
         axs = (
                Pc=Axis(fig[1,1][1,1], title="Pressure", xlabel="x (m)", ylabel="elevation (m.a.s.l.)"),
@@ -112,8 +119,9 @@ function postprocess_arolla(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residual
               Pc=heatmap!(axs.Pc, xc, yc, Pc, colormap=ColorSchemes.viridis),
               Vm=heatmap!(axs.Vm, xc, yc, Vm, colormap=ColorSchemes.viridis),
               Vs=lines!(axs.Vs, xc, @.(sqrt(Vxs^2 + Vys^2)), color=violet),
-              Tb=lines!(axs.Tb, xc, τxy_bed, color=violet),
-              Er=scatterlines!(axs.Er, itercounts.newton ./ size(Pc, 1), log10.(residuals.newton), color=green, marker=:circle, label="Velocity"))
+              Tb=lines!(axs.Tb, xc, τxyb, color=violet),
+              Er=scatterlines!(axs.Er, itercounts.newton ./ size(Pc, 1), log10.(residuals.newton), color=green, marker=:circle, label="Velocity")
+              )
     
         cbar= (
               Pc=Colorbar(fig[1,1][1, 2], plt.Pc, label="kPa"),
@@ -121,17 +129,13 @@ function postprocess_arolla(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residual
               Er=Legend(fig[5,1][2, 1], axs.Er, orientation=:horizontal, framevisible=false, padding=(0, 0, 0, 0))
             )
     
-        save("overview_arolla.pdf",fig)
-    end
-    
-    open("data_arolla.txt", "w") do io
-        println(io, "x\tVx\tVy\tτxy")
-        for i = eachindex(xc)
-            println(io, xc[i]/5000, "\t",Vxs[i], "\t", Vys[i], "\t", τxy_bed[i])
+        if savefig
+            save("overview_arolla_$(nx)x$(ny).pdf", fig)
+        else
+            display(fig)
         end
     end
 end
-    
 
 function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
             ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, freq_recompute=100,
@@ -370,14 +374,4 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
     println("computation finished, elapsed time = ", Δt, "s")
     return P, V, τ, ωₐ, ωₛ, xc, yc, iter, res
 end
-
-n = 100
-P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals = run("data/arolla100.dat";
-                                                  n=n, aspect=0.3,
-                                                  γ_factor=1e5, niter=5000n,
-                                                  ϵ_ph=1e-8, ϵ_cg=1e-10, ϵ_newton=1e-9,
-                                                  freq_recompute=50, verbose=false);
-
-postprocess_arolla(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals)
-
 
