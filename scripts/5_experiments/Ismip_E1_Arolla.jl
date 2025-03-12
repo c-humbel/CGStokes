@@ -13,7 +13,7 @@ include("../4_nonlinear_augmLagrange/kernels_volume_fractions.jl")
 
 function setup_arolla(nx::Int, aspect_ratio, filepath, backend)
     # data from https://frank.pattyn.web.ulb.be/ismip/welcome.html#Input
-    data, _ = readdlm(filepath, '\t', Float64, header=true)
+    data  = readdlm(filepath, '\t', Float64)
     x_max = maximum(data[:, 1])
     x_min = minimum(data[:, 1])
     Lx    = x_max - x_min
@@ -48,7 +48,89 @@ function setup_arolla(nx::Int, aspect_ratio, filepath, backend)
     return Lx, Ly, nx, ny, Δx, Δy, xc, yc, xv, yv, ωₐ, ωₛ
 end
 
+# post processsing                                                  
+function surface_velocities(ωac, ωsc, Vxv, Vyc)
+    # dimensions: ω = (nx+2,ny+2)
+    Vx_surf = zeros(size(Vyc, 1))
+    Vy_surf = zeros(size(Vyc, 1))
 
+    for i = axes(ωac, 1)[2: end-1]
+        j = findlast(w -> w == 1, ωac[i, :])
+        if !isnothing(j) && ωsc[i, j] != 0
+            Vx_surf[i-1] = Vxv[i,j-1]
+            Vy_surf[i-1] = Vyc[i-1,j-1]
+        else
+            Vx_surf[i-1] = NaN
+            Vy_surf[i-1] = NaN
+        end
+    end
+
+    return Vx_surf, Vy_surf
+end
+
+function bed_stress(ωac, ωsc, τcxy)
+    τxy_bed = zeros(size(τcxy, 1) - 2)
+    for i = axes(τcxy, 1)[2:end-1]
+        j = findfirst(w -> w == 1, ωsc[i, :])
+        if !isnothing(j) && ωac[i, j] != 0
+            τxy_bed[i-1] = τcxy[i, j]
+        else
+            τxy_bed[i-1] = NaN
+        end
+    end
+    return τxy_bed
+end
+
+function postprocess_arolla(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals)
+    violet, green = resample(ColorSchemes.viridis, 5)[[1, 3]]
+    Pc = Array(P.c) ./ 1000 # kPa
+    Vxc = Array(V.xc) .* 31556926 # m/year
+    Vxv = Array(V.xv) .* 31556926
+    Vyc = Array(V.yc) .* 31556926
+    ωsc = Array(ωₛ.c)
+    ωac = Array(ωₐ.c)
+    τcxy = Array(τ.c.xy) ./ 1000 # kPa
+    Vm  = 0.5 .* sqrt.((Vxc[2:end, :] .+ Vxc[1:end-1, :]) .^2 .+ (Vyc[:, 2:end] .+ Vyc[:, 1:end-1]) .^2)
+    Vxs, Vys = surface_velocities(ωac, ωsc, Vxv, Vyc)
+    τxy_bed = bed_stress(ωac, ωsc, τcxy)
+    background = ωac[2:end-1, 2:end-1] .* ωsc[2:end-1, 2:end-1] .== 0
+    Pc[background] .= NaN
+    Vm[background] .= NaN
+    with_theme(theme_latexfonts()) do
+        # visualisation
+        fig = Figure(fontsize=16,size=(800,1600))
+        axs = (
+               Pc=Axis(fig[1,1][1,1], title="Pressure", xlabel="x (m)", ylabel="elevation (m.a.s.l.)"),
+               Vm=Axis(fig[2,1][1,1], title="Velocity", xlabel="x (m)", ylabel="elevation (m.a.s.l.)"),
+               Vs=Axis(fig[3,1][1,1], title="Surface Velocity", xlabel="x (m)", ylabel="m/a"),
+               Tb=Axis(fig[4,1][1,1], title="Basal Shear Stress", xlabel="x (m)", ylabel="kPa"),
+               Er=Axis(fig[5,1][1,1], title="Convergence", xlabel="conjugate gradient iterations / nx", ylabel="residual norm")
+            )
+    
+        scatterlines!(axs.Er, itercounts.ph ./ size(Pc, 1), log10.(residuals.ph), color=violet, marker=:diamond, linestyle=:dash, label="Pressure")
+        plt = (
+              Pc=heatmap!(axs.Pc, xc, yc, Pc, colormap=ColorSchemes.viridis),
+              Vm=heatmap!(axs.Vm, xc, yc, Vm, colormap=ColorSchemes.viridis),
+              Vs=lines!(axs.Vs, xc, @.(sqrt(Vxs^2 + Vys^2)), color=violet),
+              Tb=lines!(axs.Tb, xc, τxy_bed, color=violet),
+              Er=scatterlines!(axs.Er, itercounts.newton ./ size(Pc, 1), log10.(residuals.newton), color=green, marker=:circle, label="Velocity"))
+    
+        cbar= (
+              Pc=Colorbar(fig[1,1][1, 2], plt.Pc, label="kPa"),
+              Vm=Colorbar(fig[2,1][1, 2], plt.Vm, label="m/a"),
+              Er=Legend(fig[5,1][2, 1], axs.Er, orientation=:horizontal, framevisible=false, padding=(0, 0, 0, 0))
+            )
+    
+        save("overview_arolla.pdf",fig)
+    end
+    
+    open("data_arolla.txt", "w") do io
+        println(io, "x\tVx\tVy\tτxy")
+        for i = eachindex(xc)
+            println(io, xc[i]/5000, "\t",Vxs[i], "\t", Vys[i], "\t", τxy_bed[i])
+        end
+    end
+end
     
 
 function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
@@ -64,8 +146,6 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
 
     # numerical parameters
     ϵ̇_bg = eps()
-    γ    = γ_factor
-
    
     # setup test case
     Lx, Ly, nx, ny, Δx, Δy, xc, yc, xv, yv, ωₐ, ωₛ = setup_arolla(n, aspect, filepath, backend)
@@ -111,13 +191,17 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
     δ = Inf # CG
     μ = Inf # CG
     χ = Inf # Newton
-    ν = Inf # Pressure
-    
-    χ_ref = tplNorm(f)
+    ν = Inf # PH
+
+    ν_ref = B_val^(-n_exp) * ρgy^n_exp * Lx^n_exp
+    χ_ref = Lx * ν_ref
+
+    γ    = γ_factor * B_val * time_ref^(2/3)
+
 
     # visualisation
-    itercounts = []
-    res_newton = []
+    res = (newton=[], ph=[])
+    iter = (newton=[], ph=[])
 
     # create Kernels
     up_D!      = update_D!(backend, workgroup, (nx+2, ny+2))
@@ -175,7 +259,7 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
     end
 
     # start timer
-    verbose && println("start computation")
+    println("start computation")
     t_init = Base.time()
     # Powell Hestenes
     it = 0
@@ -241,14 +325,6 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
                 # d = β d + inv(M) * k 
                 up_D!(D, K, invM, β)
 
-                it_cg += 1
-                it += 1
-
-                if verbose && it_cg % n == 0
-                    println("CG residual, μ = ", μ / μ_ref, ", δ = ", δ)
-
-                end
-
                 # periodically check for stagnation
                 if it_cg % freq_recompute == 0
                     δ = α * tplNorm(D) / tplNorm(dV) 
@@ -256,14 +332,16 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
                         break
                     end
                 end
+                it_cg += 1
+                it    += 1
             end
             # damped to newton iteration
             # find λ st. r(v - λ dv) < r(v)
-            λ = .5
+            λ = .3
             step_V!(V̄, V, dV, λ)
             comp_P_τ!(P, τ, P₀, V, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
             comp_R!(R, P, τ, f, ωₐ, ωₛ, iΔx, iΔy)
-            χ_new = tplNorm(R) / χ_ref
+            χ_new = tplNorm(R, Inf) / χ_ref
             # while χ_new >= χ && λ > 1e-3
             #     λ /= MathConstants.golden
             #     step_V!(V̄, V, dV, λ)
@@ -274,71 +352,32 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
             tplSet!(V, V̄)
             χ = χ_new
  
-            push!(itercounts, it)
-            push!(res_newton, χ)
+            push!(iter.newton, it)
+            push!(res.newton, χ)
             
-            verbose && println("Newton residual = ", χ, "; λ = ", λ, "; total iteration count: ", round(Int, it / nx), "nx")
+            verbose && println(round(Int, it / nx), "nx\t", "Newton update, residual = ", χ, )
         end    
         comp_divV!(divV, V,  ωₐ, ωₛ, iΔx, iΔy)
-        ν = tplNorm(divV) / tplNorm(P)
-        verbose && println("Pressure residual = ", ν, ", Newton residual = ", χ, ", CG residual = ", δ)
+        ν = tplNorm(divV, Inf) / ν_ref
+        push!(iter.ph, it)
+        push!(res.ph, ν)
+        verbose && println("Pressure update, residual = ", ν)
     end
     Δt = Base.time() - t_init
-    verbose && println("Time elapsed: ", Δt, "s")
-    return P, V, ωₐ, ωₛ, xc, yc, itercounts, res_newton
+    if ν > ϵ_ph
+        println("computation did not converge")
+    end
+    println("computation finished, elapsed time = ", Δt, "s")
+    return P, V, τ, ωₐ, ωₛ, xc, yc, iter, res
 end
 
 n = 100
-P, V, ωₐ, ωₛ, xc, yc, itercounts, res_newton = run("data/arolla100.dat";
+P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals = run("data/arolla100.dat";
                                                   n=n, aspect=0.3,
-                                                  γ_factor=1e8, niter=500n,
-                                                  ϵ_ph=1e-8, ϵ_cg=1e-10, ϵ_newton=1e-8,
-                                                  freq_recompute=100, verbose=false);
+                                                  γ_factor=1e5, niter=5000n,
+                                                  ϵ_ph=1e-8, ϵ_cg=1e-10, ϵ_newton=1e-9,
+                                                  freq_recompute=50, verbose=false);
 
-
-@views function surface_velocity(ωac, ωsc, Vm)
-# dimensions: ω = (nx+2,ny+2), Vm =(nx,ny)
-    V_surf = zeros(size(Vm, 1))
-
-    for i = axes(ωac, 1)[2: end-1]
-        j = findfirst(w -> w == 0, ωac[i, :])
-        if !isnothing(j) && ωsc[i, j] != 0
-            V_surf[i-1] = Vm[i-1, max(1,j-3)]
-        else
-            V_surf[i-1] = NaN
-        end
-    end
-
-    return V_surf
-end
-
-Pc = Array(P.c)
-Vxc = Array(V.xc)
-Vyc = Array(V.yc)
-ωsc = Array(ωₛ.c)
-ωac = Array(ωₐ.c)
-Vm  = 0.5 .* sqrt.((Vxc[2:end, :] .+ Vxc[1:end-1, :]) .^2 .+ (Vyc[:, 2:end] .+ Vyc[:, 1:end-1]) .^2)
-Vs = surface_velocity(ωac, ωsc, Vm)
-# visualisation
-fig = Figure(size=(800,1200))
-axs = (ω =Axis(fig[1,1][1,1], title="domain", xlabel="x", ylabel="y"),
-       Pc=Axis(fig[2,1][1,1], title="pressure", xlabel="x", ylabel="y"),
-       Vm=Axis(fig[3,1][1,1], title="velocity magnitude", xlabel="x", ylabel="y"),
-       Vs=Axis(fig[4,1][1,1], title="surface velocity", xlabel="x", ylabel="m/s"),
-       Er=Axis(fig[5,1][1,1], title="Convergence of Newton Method", xlabel="iterations / nx", ylabel="residual norm")
-       )
-
-plt = (ω =heatmap!(axs.ω , ωac .* ωsc, colormap=:greys),
-       Pc=heatmap!(axs.Pc, Pc, colormap=ColorSchemes.viridis),
-       Vm=heatmap!(axs.Vm, Vm, colormap=ColorSchemes.viridis),
-       Vs=scatter!(axs.Vs, xc, Vs, color=:blue),
-       Er=scatterlines!(axs.Er, itercounts ./ size(Pc, 1), log10.(res_newton), color=:purple))
-
-cbar= (ω =Colorbar(fig[1,1][1, 2], plt.ω),
-       Pc=Colorbar(fig[2,1][1, 2], plt.Pc),
-       Vm=Colorbar(fig[3,1][1, 2], plt.Vm),
-       )
-
-display(fig)
+postprocess_arolla(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals)
 
 
