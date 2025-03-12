@@ -139,7 +139,7 @@ end
 
 function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
             ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, freq_recompute=100,
-            backend=CPU(), workgroup=64, Float64=Float64, verbose=false)
+            backend=CPU(), workgroup=64, verbose=false)
 
     # parameters from ISMIP, transformation according to Schoof (2006)
     ρgy   = 9.81 * 910.
@@ -275,7 +275,7 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
         comp_P_τ!(P, τ, P₀, V, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
         comp_R!(R, P, τ, f, ωₐ, ωₛ, iΔx, iΔy)
 
-        χ = tplNorm(R) / χ_ref
+        χ = tplNorm(R, Inf) / χ_ref
 
         # Newton iteration
         while it < niter && χ > ϵ_newton
