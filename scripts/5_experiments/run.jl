@@ -1,4 +1,4 @@
-include("Ismip_E000_Arolla.jl")
+include("Ismip.jl")
 
 args = Dict(:n              => 1000,
             :aspect         => 0.3,
@@ -12,6 +12,6 @@ args = Dict(:n              => 1000,
             :backend        => CUDABackend(),
             :workgroup      => (32, 8))
 
-out = run("data/arolla100.dat"; args...)
+out = run("arolla", "data/arolla100.dat"; args...)
 dat = extract_data(out...)
 create_summary_plots(dat...; savefig=true)

@@ -32,7 +32,6 @@ function setup_arolla(nx::Int, aspect_ratio, filepath, backend)
     xv = LinRange(x_min - 0.5Δx, x_max + 0.5Δx, nx+1)
     yv = LinRange(y_min - 0.5Δy, y_max + 0.5Δy, ny+1)
 
-
     ωₐ = (c=KernelAbstractions.zeros(backend, Float64, nx+2, ny+2),
            v=KernelAbstractions.zeros(backend, Float64, nx+1, ny+1),
            xc=KernelAbstractions.zeros(backend, Float64, nx+1, ny),
@@ -48,6 +47,37 @@ function setup_arolla(nx::Int, aspect_ratio, filepath, backend)
     initialise_volume_fractions_from_function!(ωₛ, fₛ, xc, yc, xv, yv, 0., 1.)
     return Lx, Ly, nx, ny, Δx, Δy, xc, yc, xv, yv, ωₐ, ωₛ
 end
+
+
+function setup_bumpy_bed(nx, aspect_ratio, Lx, backend)
+    fₐ(x) = - x * tand(0.5)
+    fₛ(x) = fₐ(x) - 1000. + 500. * sin(2π * x / Lx)
+
+    Δx = Lx / nx
+    xc = LinRange(Δx/2, Lx - Δx/2, nx)
+    xv = LinRange(0, Lx, nx + 1)
+    y_max = 0
+    y_min = minimum(fₛ, xc)
+    Ly = y_max - y_min
+    # additional row of cells at top and bottom 
+    ny = round(Int, Ly / (Δx * aspect_ratio)) + 2
+    Δy = Ly / (ny-2)
+    yc = LinRange(y_min - Δy/2, y_max + Δy/2, ny)
+    yv = LinRange(y_min - Δy, y_max + Δy, ny + 1)
+
+    ωₐ = (c=KernelAbstractions.zeros(backend, Float64, nx+2, ny+2),
+           v=KernelAbstractions.zeros(backend, Float64, nx+1, ny+1),
+           xc=KernelAbstractions.zeros(backend, Float64, nx+1, ny),
+           yc=KernelAbstractions.zeros(backend, Float64, nx, ny+1),
+           xv=KernelAbstractions.zeros(backend, Float64, nx+2, ny+1),
+           yv=KernelAbstractions.zeros(backend, Float64, nx+1, ny+2))
+    ωₛ = deepcopy(ωₐ)
+
+    initialise_volume_fractions_from_function!(ωₐ, fₐ, xc, yc, xv, yv, 1., 0.)
+    initialise_volume_fractions_from_function!(ωₛ, fₛ, xc, yc, xv, yv, 0., 1.)
+    return Lx, Ly, nx, ny, Δx, Δy, xc, yc, xv, yv, ωₐ, ωₛ
+end
+
 
 # post processsing                                                  
 function compute_boundary_properties(ωac, ωsc, Vxv, Vyc, τcxy, Pc, Δy)
@@ -74,7 +104,7 @@ function compute_boundary_properties(ωac, ωsc, Vxv, Vyc, τcxy, Pc, Δy)
     return Vx_surf, Vy_surf, τxy_bed, ΔP_bed
 end
 
-function extract_data(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals)
+function extract_data(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals; save=true)
     nx = length(xc)
     ny = length(yc)
     Pc = Array(P.c) ./ 1000 # kPa
@@ -88,14 +118,14 @@ function extract_data(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals)
     Vm  = 0.5 .* sqrt.((Vxc[2:end, :] .+ Vxc[1:end-1, :]) .^2 .+ (Vyc[:, 2:end] .+ Vyc[:, 1:end-1]) .^2)
 
     Vxs, Vys, τxyb, ΔPb = compute_boundary_properties(ωac, ωsc, Vxv, Vyc, τcxy, Pc, yc[2] - yc[1])
-    writedlm("compare_arolla_$(nx)x$(ny).dat", hcat(xc ./ 5000, Vxs, Vys, τxyb, ΔPb))
+    save && writedlm("boundary_data_$(nx)x$(ny).dat", hcat(xc ./ 5000, Vxs, Vys, τxyb, ΔPb))
 
 
     background = ωac[2:end-1, 2:end-1] .* ωsc[2:end-1, 2:end-1] .== 0
     Pc[background] .= NaN
     Vm[background] .= NaN
 
-    jldsave("raw_data_arolla_$(nx)x$(ny).jld2"; Pc, Vm, Vxc, Vyc, τcxy, ωac, ωsc, xc, yc, itercounts, residuals, compress=true)
+    save && jldsave("raw_data_$(nx)x$(ny).jld2"; Pc, Vm, Vxc, Vyc, τcxy, ωac, ωsc, xc, yc, itercounts, residuals, compress=true)
 
     return Pc, Vm, Vxs, Vys, τxyb, ΔPb, xc, yc, itercounts, residuals
 end
@@ -107,8 +137,8 @@ function create_summary_plots(Pc, Vm, Vxs, Vys, τxyb, ΔPb, xc, yc, itercounts,
         violet, green = resample(ColorSchemes.viridis, 5)[[1, 3]]
         fig = Figure(fontsize=16,size=(800,1600))
         axs = (
-               Pc=Axis(fig[1,1][1,1], title="Pressure", xlabel="x (m)", ylabel="elevation (m.a.s.l.)"),
-               Vm=Axis(fig[2,1][1,1], title="Velocity", xlabel="x (m)", ylabel="elevation (m.a.s.l.)"),
+               Pc=Axis(fig[1,1][1,1], title="Pressure", xlabel="x (m)", ylabel="elevation (m)"),
+               Vm=Axis(fig[2,1][1,1], title="Velocity", xlabel="x (m)", ylabel="elevation (m)"),
                Vs=Axis(fig[3,1][1,1], title="Surface Velocity", xlabel="x (m)", ylabel="m/a"),
                Tb=Axis(fig[4,1][1,1], title="Basal Shear Stress", xlabel="x (m)", ylabel="kPa"),
                Er=Axis(fig[5,1][1,1], title="Convergence", xlabel="conjugate gradient iterations / nx", ylabel="residual norm")
@@ -137,7 +167,7 @@ function create_summary_plots(Pc, Vm, Vxs, Vys, τxyb, ΔPb, xc, yc, itercounts,
     end
 end
 
-function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
+function run(model, model_input; n=126, niter=10000, γ_factor=1., aspect=0.5,
             ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, freq_recompute=100,
             backend=CPU(), workgroup=64, verbose=false)
 
@@ -152,7 +182,14 @@ function run(filepath; n=126, niter=10000, γ_factor=1., aspect=0.5,
     ϵ̇_bg = eps()
    
     # setup test case
-    Lx, Ly, nx, ny, Δx, Δy, xc, yc, xv, yv, ωₐ, ωₛ = setup_arolla(n, aspect, filepath, backend)
+    if lowercase(model) == "arolla"
+        setup = setup_arolla
+    elseif contains(lowercase(model), "bumpy")
+        setup = setup_bumpy_bed
+    else
+        error("Invalid model option" * model)
+    end
+    Lx, Ly, nx, ny, Δx, Δy, xc, yc, xv, yv, ωₐ, ωₛ = setup(n, aspect, model_input, backend)
 
     iΔx, iΔy = inv(Δx), inv(Δy)
 
