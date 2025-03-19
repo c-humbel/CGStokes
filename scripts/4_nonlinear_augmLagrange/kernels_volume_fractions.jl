@@ -2,68 +2,28 @@
 @kernel inbounds=true function compute_P_τ_weighted!(P, τ, P₀, V, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
     i, j = @index(Global, NTuple)
     if i <= size(P.c, 1) && j <= size(P.c, 2)
-        # wall BC
-        if i == 1
-            V.xc[i, j] = 0.
-            τ.c.xy[i, j+1] = 0.
-        end
-
-        if i + 1 == size(V.xc, 1)
-            V.xc[i+1, j] = 0.
-            τ.c.xy[i+2, j+1] = 0.
-        end
-
-        if j == 1
-            V.yc[i, j] = 0.
-            τ.c.xy[i+1, j] = 0.
-        end
-
-        if j + 1 == size(V.yc, 2)
-            V.yc[i, j+1] = 0.
-            τ.c.xy[i+1, j+2] = 0.
-        end
-        # check nullspace
-        nullspace = ωₐ.xc[i+1, j] * ωₐ.xc[i, j] * ωₐ.yc[i, j+1] * ωₐ.yc[i, j] 
 
         # Pressure update
         dVxdx = (V.xc[i+1, j] * ωₛ.xc[i+1, j] - V.xc[i, j] * ωₛ.xc[i, j]) * iΔx 
         dVydy = (V.yc[i, j+1] * ωₛ.yc[i, j+1] - V.yc[i, j] * ωₛ.yc[i, j]) * iΔy
 
-        P.c[i, j] = nullspace * (P₀.c[i, j] - γ * (dVxdx + dVydy))
+        P.c[i, j] = (P₀.c[i, j] - γ * (dVxdx + dVydy))
         
         # Stress update
         dVxdy_dVydx = 0.5 * ( (V.xv[i+1, j+1] * ωₛ.xv[i+1, j+1] - V.xv[i+1, j] * ωₛ.xv[i+1, j]) * iΔy
                             + (V.yv[i+1, j+1] * ωₛ.yv[i+1, j+1] - V.yv[i, j+1] * ωₛ.yv[i, j+1]) * iΔx)
 
         η = 0.5 * B.c[i, j] * (0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2)^(0.5q - 1)
-        τ.c.xx[i, j] = nullspace * 2 * η * dVxdx
-        τ.c.yy[i, j] = nullspace * 2 * η * dVydy
-        τ.c.xy[i+1, j+1] =  nullspace * 2 * η * dVxdy_dVydx
+        τ.c.xx[i, j] = 2 * η * dVxdx
+        τ.c.yy[i, j] = 2 * η * dVydy
+        τ.c.xy[i+1, j+1] =  2 * η * dVxdy_dVydx
     end
 
-    if i <= size(P.v, 1) && j <= size(P.v, 2)
-        if i == 1
-            V.xv[i, j] = 0.
-        end
-
-        if i + 1 == size(V.xv, 1)
-            V.xv[i+1, j] = 0.
-        end
-
-        if j == 1
-            V.yv[i, j] = 0.
-        end
-
-        if j + 1 == size(V.yv, 2)
-            V.yv[i, j+1] = 0.
-        end
-
-        nullspace = ωₐ.xv[i+1, j] * ωₐ.xv[i, j] * ωₐ.yv[i, j+1] * ωₐ.yv[i, j]
-        
+    if i <= size(P.v, 1) && j <= size(P.v, 2)        
         dVxdx = (V.xv[i+1, j] * ωₛ.xv[i+1, j] - V.xv[i, j] * ωₛ.xv[i, j]) * iΔx
         dVydy = (V.yv[i, j+1] * ωₛ.yv[i, j+1] - V.yv[i, j] * ωₛ.yv[i, j]) * iΔy
 
-        P.v[i, j] = nullspace * (P₀.v[i, j] - γ * (dVxdx + dVydy))
+        P.v[i, j] = (P₀.v[i, j] - γ * (dVxdx + dVydy))
 
         if 1 < i < size(P.v, 1) && 1 < j < size(P.v, 2)
             dVxdy_dVydx = 0.5 * ( (V.xc[i, j] * ωₛ.xc[i, j] - V.xc[i, j-1] * ωₛ.xc[i, j-1]) * iΔy 
@@ -73,9 +33,9 @@
         end
 
         η = 0.5 * B.v[i, j] * ((0.5 * dVxdx^2 + 0.5 * dVydy^2 + dVxdy_dVydx^2 + 2 * ϵ̇_bg^2) ^ (0.5q - 1))
-        τ.v.xx[i, j] = nullspace * 2 * η * dVxdx
-        τ.v.yy[i, j] = nullspace * 2 * η * dVydy
-        τ.v.xy[i, j] = nullspace * 2 * η * dVxdy_dVydx
+        τ.v.xx[i, j] = 2 * η * dVxdx
+        τ.v.yy[i, j] = 2 * η * dVydy
+        τ.v.xy[i, j] = 2 * η * dVxdy_dVydx
     end
 end
 
