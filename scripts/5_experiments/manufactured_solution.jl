@@ -1,8 +1,9 @@
 using KernelAbstractions
 using Enzyme
+using JLD2
 
 include("../../src/tuple_manip.jl")
-include("../4_nonlinear_augmLagrange/kernels_free_slip.jl")
+include("../../src/kernels_2D.jl")
 
 
 @kernel function compute_error!(Er, V, Vex)
@@ -25,7 +26,7 @@ end
 function run_manufactured_solution(;n=100, γ_factor=1e5,
                                     niter=1e6, freq_recompute=100,
                                     ϵ_ph=1e-8, ϵ_newton=1e-8, ϵ_cg=1e-10,
-                                    backend=CPU(), workgroup=64, verbose=false)
+                                    backend=CPU(), workgroup=64, verbose=false, save=false)
     # physics
     B_val = 1.0
     n_exp = 1.1
@@ -74,16 +75,19 @@ function run_manufactured_solution(;n=100, γ_factor=1e5,
     invM = deepcopy(V)  # preconditioner, cells correspoinding to Dirichlet BC are zero
     f    = deepcopy(V)  # body force
     Vex  = deepcopy(V)  # exact solution
+
     # field initialisation
-    tplFill!(B, B_val)
-    copyto!(f.xc, [fx(x,y) for x=xv, y=yc])
-    copyto!(f.yc, [fy(x,y) for x=xc, y=yv])
-    copyto!(f.xv[2:end-1, :], [fx(x,y) for x=xc, y=yv])
-    copyto!(f.yv[:, 2:end-1], [fy(x,y) for x=xv, y=yc])
-    copyto!(Vex.xc, [Vx(x,y) for x=xv, y=yc])
-    copyto!(Vex.yc, [Vy(x,y) for x=xc, y=yv])
-    copyto!(Vex.xv[2:end-1, :], [Vx(x,y) for x=xc, y=yv])
-    copyto!(Vex.yv[:, 2:end-1], [Vy(x,y) for x=xv, y=yc])
+    @views begin
+        tplFill!(B, B_val)
+        copyto!(f.xc, [fx(x,y) for x=xv, y=yc])
+        copyto!(f.yc, [fy(x,y) for x=xc, y=yv])
+        copyto!(f.xv[2:end-1, :], [fx(x,y) for x=xc, y=yv])
+        copyto!(f.yv[:, 2:end-1], [fy(x,y) for x=xv, y=yc])
+        copyto!(Vex.xc, [Vx(x,y) for x=xv, y=yc])
+        copyto!(Vex.yc, [Vy(x,y) for x=xc, y=yv])
+        copyto!(Vex.xv[2:end-1, :], [Vx(x,y) for x=xc, y=yv])
+        copyto!(Vex.yv[:, 2:end-1], [Vy(x,y) for x=xv, y=yc])
+    end
 
     # residual norms for monitoring convergence
     δ = Inf # CG
@@ -91,9 +95,9 @@ function run_manufactured_solution(;n=100, γ_factor=1e5,
     χ = Inf # Newton
     ν = Inf # PH
 
-    errV  = []  # velocity error
-    errP  = []  # pressure error
-    iters = []  # iteration count
+    errV  = Float64[]  # velocity error
+    errP  = Float64[]  # pressure error
+    iters = Int64[]  # iteration count
 
     γ    = γ_factor
     # create Kernels
@@ -173,8 +177,6 @@ function run_manufactured_solution(;n=100, γ_factor=1e5,
             initialise_invM!(invM, R̂, Q, P, P̄, P̂, τ, τ̄, τ̂, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             # reference for cg residual
             μ_ref = tplDot(R, R, invM)
-        
-
             # iteration zero
             # compute residual for CG,
             # k = r - Dv r * dv
@@ -186,11 +188,9 @@ function run_manufactured_solution(;n=100, γ_factor=1e5,
             # d = inv(M) * k
             init_D!(D, K, invM)
             μ = tplDot(K, D)
-            μ₀ = μ
-            # δ = tplNorm(K, Inf) / δ_ref
             # start iteration
             it_cg = 1
-            while it <= niter && μ > ϵ_cg^2 * μ₀
+            while it <= niter && μ > ϵ_cg^2 * μ_ref
                 # compute α
                 # α = k^T * inv(M) * k / (d^T * Dv r * d)
                 set!(V̄, D)
@@ -232,10 +232,10 @@ function run_manufactured_solution(;n=100, γ_factor=1e5,
             #  newton iteration
             λ = .3
             step_V!(V̄, V, dV, λ)
-            comp_P_τ!(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+            tplSet!(V, V̄)
+            comp_P_τ!(P, τ, P₀, V̄, B, q, ϵ̇_bg, iΔx, iΔy, γ)
             comp_R!(R, P, τ, f, iΔx, iΔy)
             χ = tplNorm(R, Inf)
-            tplSet!(V, V̄)
             verbose && println(round(Int, it / nx), "nx\t", "Newton update, residual = ", χ / χ₀)
         end    
         comp_divV!(divV, V, iΔx, iΔy)
@@ -251,8 +251,12 @@ function run_manufactured_solution(;n=100, γ_factor=1e5,
         println("computation did not converge")
     end
     println("computation finished")
+    Pc  = Array(P.c)
+    Vxc = Array(V.xc)
+    Vyc = Array(V.yc)
+    Vxe = Array(Vex.xc)
+    Vye = Array(Vex.yc)
+    save && jldsave("manufactured_raw_data_$(nx)x$(ny).jld2";Pc, Vxc, Vyc, Vxe, Vye, errV, errP, iters)
 
     return errV, errP, iters
 end
-
-out = run_manufactured_solution(n=32, niter=1e5, ϵ_cg=1e-8, ϵ_newton=1e-5, ϵ_ph=1e-5, verbose=true)
