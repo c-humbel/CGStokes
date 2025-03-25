@@ -8,8 +8,7 @@ using Interpolations
 using JLD2
 
 include("../../src/tuple_manip.jl")
-include("../4_nonlinear_augmLagrange/kernels_free_slip.jl")
-include("../4_nonlinear_augmLagrange/kernels_volume_fractions.jl")
+include("../../src/kernels_2D.jl")
 
 
 function setup_arolla(nx::Int, aspect_ratio, filepath, backend)
@@ -43,36 +42,6 @@ function setup_arolla(nx::Int, aspect_ratio, filepath, backend)
     # compute volume fractions
     fₐ = extrapolate(interpolate!((data[:, 1],), data[:, 3], Gridded(Linear())), Flat())
     fₛ = extrapolate(interpolate!((data[:, 1],), data[:, 2], Gridded(Linear())), Flat())
-    initialise_volume_fractions_from_function!(ωₐ, fₐ, xc, yc, xv, yv, 1., 0.)
-    initialise_volume_fractions_from_function!(ωₛ, fₛ, xc, yc, xv, yv, 0., 1.)
-    return Lx, Ly, nx, ny, Δx, Δy, xc, yc, xv, yv, ωₐ, ωₛ
-end
-
-
-function setup_bumpy_bed(nx, aspect_ratio, Lx, backend)
-    fₐ(x) = - x * tand(0.5)
-    fₛ(x) = fₐ(x) - 1000. + 500. * sin(2π * x / Lx)
-
-    Δx = Lx / nx
-    xc = LinRange(Δx/2, Lx - Δx/2, nx)
-    xv = LinRange(0, Lx, nx + 1)
-    y_max = 0
-    y_min = minimum(fₛ, xc)
-    Ly = y_max - y_min
-    # additional row of cells at top and bottom 
-    ny = round(Int, Ly / (Δx * aspect_ratio)) + 2
-    Δy = Ly / (ny-2)
-    yc = LinRange(y_min - Δy/2, y_max + Δy/2, ny)
-    yv = LinRange(y_min - Δy, y_max + Δy, ny + 1)
-
-    ωₐ = (c=KernelAbstractions.zeros(backend, Float64, nx+2, ny+2),
-           v=KernelAbstractions.zeros(backend, Float64, nx+1, ny+1),
-           xc=KernelAbstractions.zeros(backend, Float64, nx+1, ny),
-           yc=KernelAbstractions.zeros(backend, Float64, nx, ny+1),
-           xv=KernelAbstractions.zeros(backend, Float64, nx+2, ny+1),
-           yv=KernelAbstractions.zeros(backend, Float64, nx+1, ny+2))
-    ωₛ = deepcopy(ωₐ)
-
     initialise_volume_fractions_from_function!(ωₐ, fₐ, xc, yc, xv, yv, 1., 0.)
     initialise_volume_fractions_from_function!(ωₛ, fₛ, xc, yc, xv, yv, 0., 1.)
     return Lx, Ly, nx, ny, Δx, Δy, xc, yc, xv, yv, ωₐ, ωₛ
@@ -167,7 +136,7 @@ function create_summary_plots(Pc, Vm, Vxs, Vys, τxyb, ΔPb, xc, yc, itercounts,
     end
 end
 
-function run(model, model_input; n=126, niter=10000, γ_factor=1., aspect=0.5,
+function run(model_input; n=126, niter=10000, γ_factor=1., aspect=0.5,
             ϵ_cg=1e-3, ϵ_ph=1e-6, ϵ_newton=1e-3, freq_recompute=100,
             backend=CPU(), workgroup=64, verbose=false)
 
@@ -181,15 +150,7 @@ function run(model, model_input; n=126, niter=10000, γ_factor=1., aspect=0.5,
     # numerical parameters
     ϵ̇_bg = eps()
    
-    # setup test case
-    if lowercase(model) == "arolla"
-        setup = setup_arolla
-    elseif contains(lowercase(model), "bumpy")
-        setup = setup_bumpy_bed
-    else
-        error("Invalid model option" * model)
-    end
-    Lx, Ly, nx, ny, Δx, Δy, xc, yc, xv, yv, ωₐ, ωₛ = setup(n, aspect, model_input, backend)
+    Lx, Ly, nx, ny, Δx, Δy, xc, yc, xv, yv, ωₐ, ωₛ = setup_arolla(n, aspect, model_input, backend)
 
     iΔx, iΔy = inv(Δx), inv(Δy)
 

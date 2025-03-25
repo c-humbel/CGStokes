@@ -12,6 +12,6 @@ args = Dict(:n              => 1000,
             :backend        => CUDABackend(),
             :workgroup      => (32, 8))
 
-out = run("arolla", "data/arolla100.dat"; args...)
+out = run("data/arolla100.dat"; args...)
 dat = extract_data(out...)
 create_summary_plots(dat...; savefig=true)

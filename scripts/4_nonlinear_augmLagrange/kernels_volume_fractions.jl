@@ -2,7 +2,6 @@
 @kernel inbounds=true function compute_P_τ_weighted!(P, τ, P₀, V, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
     i, j = @index(Global, NTuple)
     if i <= size(P.c, 1) && j <= size(P.c, 2)
-
         # Pressure update
         dVxdx = (V.xc[i+1, j] * ωₛ.xc[i+1, j] - V.xc[i, j] * ωₛ.xc[i, j]) * iΔx 
         dVydy = (V.yc[i, j+1] * ωₛ.yc[i, j+1] - V.yc[i, j] * ωₛ.yc[i, j]) * iΔy
