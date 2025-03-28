@@ -1,4 +1,4 @@
-include("Ismip.jl")
+include("ISMIP_Arolla.jl")
 
 args = Dict(:n              => 1000,
             :aspect         => 0.3,

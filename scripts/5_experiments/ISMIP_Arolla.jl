@@ -94,7 +94,7 @@ function extract_data(P, V, τ, ωₐ, ωₛ, xc, yc, itercounts, residuals; sav
     Pc[background] .= NaN
     Vm[background] .= NaN
 
-    save && jldsave("raw_data_$(nx)x$(ny).jld2"; Pc, Vm, Vxc, Vyc, τcxy, ωac, ωsc, xc, yc, itercounts, residuals, compress=true)
+    save && jldsave("arolla_raw_data_$(nx)x$(ny).jld2"; Pc, Vm, Vxc, Vyc, τcxy, ωac, ωsc, xc, yc, itercounts, residuals, compress=true)
 
     return Pc, Vm, Vxs, Vys, τxyb, ΔPb, xc, yc, itercounts, residuals
 end
