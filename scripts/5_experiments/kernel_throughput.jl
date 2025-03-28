@@ -89,7 +89,12 @@ function measure_residual(n; backend=CPU(), workgroup=64, type=Float64, volume_f
     # currently:
     #   Pressure and stress: 8 reads, 8 writes, ignoring BC
     #   Residual: 12 reads, 4 writes
-    A_eff = (2*16) * nx * ny * sizeof(type) / 1e9
+    if volume_fractions
+        # comp_P_τ reads velocity ωₛ, comp_R reads cell ωₛ, all of ωₐ
+        A_eff = (2*16 + 4 + 8) * nx * ny * sizeof(type) / 1e9
+    else
+        A_eff = (2*16) * nx * ny * sizeof(type) / 1e9
+    end
 
     return A_eff, median(timings), quantile(timings, 0.05), quantile(timings, 0.95)
 
@@ -107,6 +112,12 @@ function measure_jvp(n; backend=CPU(), workgroup=64, type=Float64, volume_fracti
     γ    = 1.
     q    = 1.33
     ϵ̇_bg = eps()
+
+
+    xc = LinRange(-0.5Lx + 0.5Δx, 0.5Lx - 0.5Δx, nx)
+    yc = LinRange(-0.5Ly + 0.5Δy, 0.5Ly - 0.5Δy, ny)
+    xv = LinRange(-0.5Lx, 0.5Lx, nx+1)
+    yv = LinRange(-0.5Ly, 0.5Ly, ny+1)
 
     P    = (c=KernelAbstractions.zeros(backend, type, nx, ny), v=KernelAbstractions.zeros(backend, type, nx+1, ny+1))
     B    = deepcopy(P)
@@ -134,89 +145,122 @@ function measure_jvp(n; backend=CPU(), workgroup=64, type=Float64, volume_fracti
         copyto!(a, rand(rng, size(a)...))
     end
 
-    if volume_fractions
-        xo = 0.0L
-        yo = 1.2L
-        rf = 1.0L
-        rb = 1.6L
-        ωₐ = (c=KernelAbstractions.zeros(backend, Float64, nx+2, ny+2),
-              v=KernelAbstractions.zeros(backend, Float64, nx+1, ny+1),
-              xc=KernelAbstractions.zeros(backend, Float64, nx+1, ny),
-              yc=KernelAbstractions.zeros(backend, Float64, nx, ny+1),
-              xv=KernelAbstractions.zeros(backend, Float64, nx+2, ny+1),
-              yv=KernelAbstractions.zeros(backend, Float64, nx+1, ny+2))
-        ωₛ = deepcopy(ωₐ)
+    xo = 0.0Lx
+    yo = 1.2Lx
+    rf = 1.0Lx
+    rb = 1.6Lx
+    ωₐ = (c=KernelAbstractions.zeros(backend, Float64, nx+2, ny+2),
+            v=KernelAbstractions.zeros(backend, Float64, nx+1, ny+1),
+            xc=KernelAbstractions.zeros(backend, Float64, nx+1, ny),
+            yc=KernelAbstractions.zeros(backend, Float64, nx, ny+1),
+            xv=KernelAbstractions.zeros(backend, Float64, nx+2, ny+1),
+            yv=KernelAbstractions.zeros(backend, Float64, nx+1, ny+2))
+    ωₛ = deepcopy(ωₐ)
 
-        initialise_volume_fractions_ring_segment!(ωₐ, ωₛ, xo, yo, rf, rb,  xc, yc, xv, yv)
-        comp_P_τ!(_P, _τ, _P₀, _V, _B, _q, _ϵ̇_bg, _iΔx, _iΔy, _γ) = compute_P_τ_weighted!(backend, workgroup, (nx+1, ny+1))(_P, _τ, _P₀, _V, _B, _q, ωₐ, ωₛ, _ϵ̇_bg, _iΔx, _iΔy, _γ)
-        comp_R!(_R, _P, _τ, _f, _iΔx, _iΔy)    = compute_R_weighted!(backend, workgroup, (nx+2, ny+2))(_R, _P, _τ, _f, ωₐ, ωₛ, _iΔx, _iΔy)
-    else
-        comp_P_τ!  = compute_P_τ!(backend, workgroup, (nx+1, ny+1))
-        comp_R!    = compute_R!(backend, workgroup, (nx+2, ny+2))
-    end
+    initialise_volume_fractions_ring_segment!(ωₐ, ωₛ, xo, yo, rf, rb,  xc, yc, xv, yv)
+
+    # comp_P_τ_wf! = compute_P_τ_weighted!(backend, workgroup, (nx+1, ny+1))
+    # comp_R_wf!   = compute_R_weighted!(backend, workgroup, (nx+2, ny+2))
+
+
+    # function jvp_R_wf(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
+    #     autodiff(Forward, comp_P_τ_wf!, DuplicatedNoNeed(P, P̄), DuplicatedNoNeed(τ, τ̄),
+    #                 Const(P₀), Duplicated(V, V̄), Const(B),
+    #                 Const(q), Const(ωₐ), Const(ωₛ), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
+
+    #     autodiff(Forward, comp_R_wf!, DuplicatedNoNeed(R, Q),
+    #                 Duplicated(P, P̄), Duplicated(τ, τ̄), Const(f), Const(ωₐ), Const(ωₛ), Const(iΔx), Const(iΔy))
+    #     return nothing
+    # end
+
+    comp_P_τ!  = compute_P_τ!(backend, workgroup, (nx+1, ny+1))
+    comp_R!    = compute_R!(backend, workgroup, (nx+2, ny+2))
 
     function jvp_R(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
         autodiff(Forward, comp_P_τ!, DuplicatedNoNeed(P, P̄), DuplicatedNoNeed(τ, τ̄),
-                 Const(P₀), Duplicated(V, V̄), Const(B),
-                 Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
+                    Const(P₀), Duplicated(V, V̄), Const(B),
+                    Const(q), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
 
         autodiff(Forward, comp_R!, DuplicatedNoNeed(R, Q),
-                 Duplicated(P, P̄), Duplicated(τ, τ̄), Const(f), Const(iΔx), Const(iΔy))
+                    Duplicated(P, P̄), Duplicated(τ, τ̄), Const(f), Const(iΔx), Const(iΔy))
+        return nothing
     end
 
-    res = @be begin
-        jvp_R(R, Q, P, dP, τ, dτ, V, dV, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-        KernelAbstractions.synchronize(backend)
-    end evals=5 samples=1000
+    # if volume_fractions
+    #     res = @be begin
+    #         jvp_R_wf(R, Q, P, dP, τ, dτ, V, dV, P₀, f, B, Q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
+    #         KernelAbstractions.synchronize(backend)
+    #     end evals=5 samples=1000
+    # else
+    #     res = @be begin
+    #         jvp_R(R, Q, P, dP, τ, dτ, V, dV, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+    #         KernelAbstractions.synchronize(backend)
+    #     end evals=5 samples=1000
+    # end
 
-    timings = [s.time for s in res.samples]
+    jvp_R(R, Q, P, dP, τ, dτ, V, dV, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+    # timings = [s.time for s in res.samples]
 
-    # effective throughput (GB / s)
-    # ideally, read: V, V̄, write Q 
-    # what actually happens, no idea
-    # but assume all arrays are treated as in direct computation, and shadows are read and written
-    A_eff = (2*16 + 8) *nx * ny * sizeof(type) / 1e9
+    # # effective throughput (GB / s)
+    # # ideally, read: V, V̄, write Q 
+    # # what actually happens, no idea
+    # # but assume all arrays are treated as in direct computation, and shadows are read and written
+    # A_eff = (volume_fractions ? 2*16 + 12 + 8 : 2*16 + 8) * nx * ny * sizeof(type) / 1e9
 
-    return  A_eff, median(timings), quantile(timings, 0.05), quantile(timings, 0.95)
-
+    # return  A_eff, median(timings), quantile(timings, 0.05), quantile(timings, 0.95)
+    return nothing
 end
 
-function benchmark_residuals(ns=2 .^(5:8); save=false)
-    results = zeros(length(ns), 8)
-    for (i, n) = enumerate(ns)
-        out_wf = measure_residual(n; backend=CPU(), workgroup=64, type=Float64, volume_fractions=true)
-        out = measure_residual(n; backend=CPU(), workgroup=64, type=Float64, volume_fractions=false)
-        results[i, :] .= n, out..., out_wf[2:end]...
+
+function benchmark(function_name, ns=2 .^(5:8); save=false, backend=CPU(), workgroup=64)
+    results = zeros(length(ns), 9)
+    if function_name == "residual"
+        f = measure_residual
+    elseif function_name == "jvp"
+        f = measure_jvp
+    else
+        return Float64[]
     end
 
-    save && writedlm("results_residuals_volume_fractions.csv", results_volume_fractions, ',')
-    save && writedlm("results_residuals.csv", results, ',')
+    for (i, n) = enumerate(ns)
+        println("start resolution ", n)
+        out_wf = f(n; backend=backend, workgroup=workgroup, type=Float64, volume_fractions=true)
+        out = f(n; backend=backend, workgroup=workgroup, type=Float64, volume_fractions=false)
+        results[i, :] .= n, out..., out_wf...
+    end
+    save && writedlm("results_$function_name.csv", results, ',')
     return results
 end
 
-function create_throughput_plot(results; savefig=false)
+
+
+function create_throughput_plot(results; title="Residual", savefig=false)
     ns = results[:, 1]
-    A_eff = results[:, 2]
 
     with_theme(theme_latexfonts()) do
         violet, green = resample(ColorSchemes.viridis, 5)[[1, 3]]
         fig = Figure(fontsize=16,size=(600,400))
-        ax  = Axis(fig[1,1], title="Memory Throughput of Residual Computation",
+        ax  = Axis(fig[1,1], title="Memory Throughput of $title Computation",
                    xlabel=L"n", ylabel=L"T_{eff} \; (\text{GB/s})",
-                   yscale=log2, xscale=log2, xticks=ns)
-        hlines!(ax, 1370, linestyle=:dash, color=:grey")
-        for (with_wf, offset, colour, marker) = zip(["with", "without"], [3, 6], [violet, green], [:diamond, :circle])
-            median_throughput = A_eff ./ results[:, offset]
-            upper_throughput = A_eff ./ results[:, offset+1]
-            lower_throughput = A_eff ./ results[:, offset+2]
+                   xscale=log2, xticks=ns)
+        hlines!(ax, 1370, linestyle=:dash, color=:grey)
+        for (with_wf, offset, colour, marker) = zip(["without", "with"], [2, 6], [violet, green], [:circle, :diamond])
+            median_throughput = results[:, offset] ./ results[:, offset+1]
+            upper_throughput = results[:, offset] ./ results[:, offset+2]
+            lower_throughput = results[:, offset] ./ results[:, offset+3]
             rangebars!(ax, ns, lower_throughput, upper_throughput, color=colour, whiskerwidth=10,)
             scatter!(ax, ns, median_throughput, color=colour, markersize=15, marker=marker, label=with_wf * " volume fractions")
         end
         Legend(fig[2, 1], ax, orientation=:horizontal, framevisible=false, padding=(0, 0, 0, 0))
         if savefig
-            save("throughput_residuals.pdf", fig)
+            save("throughput_$(lowercase(title)).pdf", fig)
         else
             display(fig)
         end
     end
 end
+
+
+res = benchmark("jvp", 2 .^(8:13), backend=CUDABackend(), workgroup=(32, 8), save=true)
+create_throughput_plot(res, title="Jacobian Vector Product", savefig=true)
+
