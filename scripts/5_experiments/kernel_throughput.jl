@@ -159,19 +159,19 @@ function measure_jvp(n; backend=CPU(), workgroup=64, type=Float64, volume_fracti
 
     initialise_volume_fractions_ring_segment!(ωₐ, ωₛ, xo, yo, rf, rb,  xc, yc, xv, yv)
 
-    # comp_P_τ_wf! = compute_P_τ_weighted!(backend, workgroup, (nx+1, ny+1))
-    # comp_R_wf!   = compute_R_weighted!(backend, workgroup, (nx+2, ny+2))
+    comp_P_τ_vf! = compute_P_τ_weighted!(backend, workgroup, (nx+1, ny+1))
+    comp_R_vf!   = compute_R_weighted!(backend, workgroup, (nx+2, ny+2))
 
 
-    # function jvp_R_wf(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
-    #     autodiff(Forward, comp_P_τ_wf!, DuplicatedNoNeed(P, P̄), DuplicatedNoNeed(τ, τ̄),
-    #                 Const(P₀), Duplicated(V, V̄), Const(B),
-    #                 Const(q), Const(ωₐ), Const(ωₛ), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
+    function jvp_R_vf(R, Q, P, P̄, τ, τ̄, V, V̄, P₀, f, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
+        autodiff(Forward, comp_P_τ_vf!, DuplicatedNoNeed(P, P̄), DuplicatedNoNeed(τ, τ̄),
+                    Const(P₀), Duplicated(V, V̄), Const(B),
+                    Const(q), Const(ωₐ), Const(ωₛ), Const(ϵ̇_bg), Const(iΔx), Const(iΔy), Const(γ))
 
-    #     autodiff(Forward, comp_R_wf!, DuplicatedNoNeed(R, Q),
-    #                 Duplicated(P, P̄), Duplicated(τ, τ̄), Const(f), Const(ωₐ), Const(ωₛ), Const(iΔx), Const(iΔy))
-    #     return nothing
-    # end
+        autodiff(Forward, comp_R_vf!, DuplicatedNoNeed(R, Q),
+                    Duplicated(P, P̄), Duplicated(τ, τ̄), Const(f), Const(ωₐ), Const(ωₛ), Const(iΔx), Const(iΔy))
+        return nothing
+    end
 
     comp_P_τ!  = compute_P_τ!(backend, workgroup, (nx+1, ny+1))
     comp_R!    = compute_R!(backend, workgroup, (nx+2, ny+2))
@@ -186,28 +186,27 @@ function measure_jvp(n; backend=CPU(), workgroup=64, type=Float64, volume_fracti
         return nothing
     end
 
-    # if volume_fractions
-    #     res = @be begin
-    #         jvp_R_wf(R, Q, P, dP, τ, dτ, V, dV, P₀, f, B, Q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
-    #         KernelAbstractions.synchronize(backend)
-    #     end evals=5 samples=1000
-    # else
-    #     res = @be begin
-    #         jvp_R(R, Q, P, dP, τ, dτ, V, dV, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-    #         KernelAbstractions.synchronize(backend)
-    #     end evals=5 samples=1000
-    # end
+    if volume_fractions
+        res = @be begin
+            jvp_R_vf(R, Q, P, dP, τ, dτ, V, dV, P₀, f, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
+            KernelAbstractions.synchronize(backend)
+        end evals=5 samples=1000
+    else
+        res = @be begin
+            jvp_R(R, Q, P, dP, τ, dτ, V, dV, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
+            KernelAbstractions.synchronize(backend)
+        end evals=5 samples=1000
+    end
 
-    jvp_R(R, Q, P, dP, τ, dτ, V, dV, P₀, f, B, q, ϵ̇_bg, iΔx, iΔy, γ)
-    # timings = [s.time for s in res.samples]
+    timings = [s.time for s in res.samples]
 
-    # # effective throughput (GB / s)
-    # # ideally, read: V, V̄, write Q 
-    # # what actually happens, no idea
-    # # but assume all arrays are treated as in direct computation, and shadows are read and written
-    # A_eff = (volume_fractions ? 2*16 + 12 + 8 : 2*16 + 8) * nx * ny * sizeof(type) / 1e9
+    # effective throughput (GB / s)
+    # ideally, read: V, V̄, write Q 
+    # what actually happens, no idea
+    # but assume all arrays are treated as in direct computation, and shadows are read and written
+    A_eff = (volume_fractions ? 2*16 + 12 + 8 : 2*16 + 8) * nx * ny * sizeof(type) / 1e9
 
-    # return  A_eff, median(timings), quantile(timings, 0.05), quantile(timings, 0.95)
+    return  A_eff, median(timings), quantile(timings, 0.05), quantile(timings, 0.95)
     return nothing
 end
 
@@ -224,9 +223,9 @@ function benchmark(function_name, ns=2 .^(5:8); save=false, backend=CPU(), workg
 
     for (i, n) = enumerate(ns)
         println("start resolution ", n)
-        out_wf = f(n; backend=backend, workgroup=workgroup, type=Float64, volume_fractions=true)
+        out_vf = f(n; backend=backend, workgroup=workgroup, type=Float64, volume_fractions=true)
         out = f(n; backend=backend, workgroup=workgroup, type=Float64, volume_fractions=false)
-        results[i, :] .= n, out..., out_wf...
+        results[i, :] .= n, out..., out_vf...
     end
     save && writedlm("results_$function_name.csv", results, ',')
     return results
@@ -244,12 +243,12 @@ function create_throughput_plot(results; title="Residual", savefig=false)
                    xlabel=L"n", ylabel=L"T_{eff} \; (\text{GB/s})",
                    xscale=log2, xticks=ns)
         hlines!(ax, 1370, linestyle=:dash, color=:grey)
-        for (with_wf, offset, colour, marker) = zip(["without", "with"], [2, 6], [violet, green], [:circle, :diamond])
+        for (with_vf, offset, colour, marker) = zip(["without", "with"], [2, 6], [violet, green], [:circle, :diamond])
             median_throughput = results[:, offset] ./ results[:, offset+1]
             upper_throughput = results[:, offset] ./ results[:, offset+2]
             lower_throughput = results[:, offset] ./ results[:, offset+3]
             rangebars!(ax, ns, lower_throughput, upper_throughput, color=colour, whiskerwidth=10,)
-            scatter!(ax, ns, median_throughput, color=colour, markersize=15, marker=marker, label=with_wf * " volume fractions")
+            scatter!(ax, ns, median_throughput, color=colour, markersize=15, marker=marker, label=with_vf * " volume fractions")
         end
         Legend(fig[2, 1], ax, orientation=:horizontal, framevisible=false, padding=(0, 0, 0, 0))
         if savefig
