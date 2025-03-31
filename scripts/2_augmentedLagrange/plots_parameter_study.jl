@@ -154,3 +154,24 @@ function colapse_lines(etas, gammas, iters; b=1, nx=128, logscale=true)
 
     return fig
 end
+
+
+function create_heatmap_gamma_values(etas, gammas, iters, nx=128)
+    iters = log10.(iters ./ nx)
+
+    
+    with_theme(theme_latexfonts()) do
+        fig = Figure(fontsize=16, size=(600, 450))
+        htmp = Axis(fig[1,1], title="Iteration Count for different Parameter and Visocity Values", xlabel=L"\gamma", ylabel="viscosity ratio",
+                    yticks=(etas[2:2:end], [L"10^{-3}", L"10^{-1}", L"10^1", L"10^3", L"10^5"]), xscale=log10, yscale=log10)
+        htmp_plot = scatter!(htmp, reshape(gammas, :), repeat(etas, inner=size(gammas, 1)), color=reshape(iters, :), markersize=45, marker=:rect)
+        Colorbar(fig[1,2], htmp_plot, label="iterations / nx", ticks=(1:3, [L"10", L"10^2", L"10^3"]))
+
+        # find optimal gamma for each viscosity ratio
+        iters_replace_nan = copy(iters)
+        iters_replace_nan[isnan.(iters)] .= Inf
+        gamma_opts = [gammas[I] for I ∈ argmin(iters_replace_nan, dims=1)[1, :]]
+        scatterlines!(htmp, gamma_opts, etas, color=:red, marker=:circle, label="min iterations")
+        return fig
+    end
+end
