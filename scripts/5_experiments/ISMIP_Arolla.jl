@@ -262,7 +262,6 @@ function run(model_input; n=126, niter=10000, γ_factor=1., aspect=0.5,
 
     # start timer
     println("start computation")
-    t_init = Base.time()
     # Powell Hestenes
     it = 0
     while it < niter && ν > ϵ_ph
@@ -365,11 +364,10 @@ function run(model_input; n=126, niter=10000, γ_factor=1., aspect=0.5,
         push!(res.ph, ν)
         verbose && println("Pressure update, residual = ", ν)
     end
-    Δt = Base.time() - t_init
     if ν > ϵ_ph
         println("computation did not converge")
     end
-    println("computation finished, elapsed time = ", Δt, "s")
+    println("computation finished")
     return P, V, τ, ωₐ, ωₛ, xc, yc, iter, res
 end
 
