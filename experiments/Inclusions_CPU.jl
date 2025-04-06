@@ -4,7 +4,7 @@ using CairoMakie
 using ColorSchemes
 using DelimitedFiles
 
-include("../2_augmentedLagrange/rectangular_Egrid.jl")
+include("../scripts/2_augmentedLagrange/rectangular_Egrid.jl")
 
 
 # copied from PseudoTransientStokes.jl

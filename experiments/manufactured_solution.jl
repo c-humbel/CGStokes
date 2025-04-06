@@ -1,9 +1,11 @@
 using KernelAbstractions
 using Enzyme
+using CUDA
 using JLD2
+using CairoMakie
 
-include("../../src/tuple_manip.jl")
-include("../../src/kernels_2D.jl")
+include("../src/tuple_manip.jl")
+include("../src/kernels_2D.jl")
 
 
 @kernel function compute_error!(Er, V, Vex)
@@ -29,15 +31,15 @@ function run_manufactured_solution(;n=100, γ_factor=1e5,
                                     backend=CPU(), workgroup=64, verbose=false, save=false)
     # physics
     B_val = 1.0
-    n_exp = 1.1
+    n_exp = 0.5
     q     = 1 + 1/n_exp
     L     = 1.0
 
     # manufactured solution
-    Vx(x, y) = sin(π*x) * cos(π*y)
-    Vy(x, y) = -cos(π*x) * sin(π*y)
-    fx(x, y) = - (B_val * π^q / 2 / n_exp) * (sin(π*x) * cos(π*y)) * (cos(π*x)^2 * cos(π*y)^2)^((1-n_exp) / 2 / n_exp)
-    fy(x, y) =   (B_val * π^q / 2 / n_exp) * (cos(π*x) * sin(π*y)) * (cos(π*x)^2 * cos(π*y)^2)^((1-n_exp) / 2 / n_exp)
+    Vx(x, y) =  sinpi(x) * cospi(y)
+    Vy(x, y) = -cospi(x) * sinpi(y)
+    fx(x, y) = -(B_val * π^q / 2 / n_exp) * (sinpi(x) * cospi(y)) * (cospi(x) * cospi(y))^(q-2)
+    fy(x, y) =  (B_val * π^q / 2 / n_exp) * (cospi(x) * sinpi(y)) * (cospi(x) * cospi(y))^(q-2)
     # numerics
     ϵ̇_bg = eps()
     nx  = ny  = n
@@ -88,7 +90,8 @@ function run_manufactured_solution(;n=100, γ_factor=1e5,
         copyto!(Vex.xv[2:end-1, :], [Vx(x,y) for x=xc, y=yv])
         copyto!(Vex.yv[:, 2:end-1], [Vy(x,y) for x=xv, y=yc])
     end
-
+    # to test how solver behaves
+    tplSet!(V, Vex)
     # residual norms for monitoring convergence
     δ = Inf # CG
     μ = Inf # CG
@@ -156,7 +159,6 @@ function run_manufactured_solution(;n=100, γ_factor=1e5,
         return nothing
     end
 
-    # start timer
     println("start computation")
     # Powell Hestenes
     it = 0
@@ -168,7 +170,9 @@ function run_manufactured_solution(;n=100, γ_factor=1e5,
         comp_P_τ!(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
         comp_R!(R, P, τ, f, iΔx, iΔy)
 
-        χ = tplNorm(R, Inf)
+        χ = tplNorm(R, 1)
+        comp_divV!(divV, V, iΔx, iΔy)
+        display(heatmap(divV.v))
         χ₀ = χ
         # Newton iteration
         while it < niter && χ > ϵ_newton * χ₀
@@ -260,3 +264,5 @@ function run_manufactured_solution(;n=100, γ_factor=1e5,
 
     return errV, errP, iters
 end
+
+run_manufactured_solution(n=100, niter=100)

@@ -7,8 +7,8 @@ using DelimitedFiles
 using Interpolations
 using JLD2
 
-include("../../src/tuple_manip.jl")
-include("../../src/kernels_2D.jl")
+include("../src/tuple_manip.jl")
+include("../src/kernels_2D.jl")
 
 
 function setup_arolla(nx::Int, aspect_ratio, filepath, backend)

@@ -9,8 +9,8 @@ using KernelAbstractions
 using Enzyme
 using CUDA
 
-include("../../src/tuple_manip.jl")
-include("../../src/kernels_2D.jl")
+include("../src/tuple_manip.jl")
+include("../src/kernels_2D.jl")
 
 
 function measure_residual(n; backend=CPU(), workgroup=64, type=Float64, volume_fractions=false, seed=1234)
