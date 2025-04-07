@@ -37,10 +37,9 @@ implemented on standard staggered grid and Arakawa E-grid
 
 **Weak inclusion on standard grid**
 
-![](../figures/2_result_miniapp.png)
+![](../figures/2_output_miniapp_10.png)
 
 **Weak inclusion on Arakawa grid**
-![](../figures/3_result_miniapp.png)
 
 * Both match the result with PT
 * Both converge faster than PT
@@ -49,20 +48,14 @@ In "easy" setting, can verify that method works
 
 **Strong inclusion with $\eta$-ratio $10^3$**
 
-![](../figures/2_result_plus3_point5.png)
-
 * still works, but takes longer to converge
 
 
 **Strong inclusion with $\eta$-ratio $10^6$**
 
-![](../figures/2_result_plus6_point5.png)
+CG doesn't converge, but overall result accepted after 3 outer steps
 
-* CG doesn't converge, but overall result accepted after 3 outer steps
-* compare to result if $\rho g = 1$ instead of $10^{-6}$:
-
-
-![](../figures/2_result_plus6_point5_rhog1.png)
+If compare to result if $\rho g = 1$ instead of $10^{-6}$:
 
 * CG doesn't converge in early steps, towards the end it behaves better
 * The result is identical to the previous, up to scaling of pressure & velocity
