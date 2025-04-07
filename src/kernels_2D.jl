@@ -1,4 +1,8 @@
-# dimensions for kernel launch: nx+1, ny+1
+"""
+compute velocity divergence
+
+dimensions for kernel launch: nx+1, ny+1
+"""
 @kernel inbounds=true function compute_divV!(divV, V, iΔx, iΔy)
     i, j = @index(Global, NTuple)
     
@@ -16,7 +20,12 @@
 end
 
 
-# dimensions for kernel launch: nx+1, ny+1
+
+"""
+update pressure and deviatoric stresses
+
+dimensions for kernel launch: nx+1, ny+1
+"""
 @kernel inbounds=true function compute_P_τ!(P, τ, P₀, V, B, q, ϵ̇_bg, iΔx, iΔy, γ)
     i, j = @index(Global, NTuple)
     if i <= size(P.c, 1) && j <= size(P.c, 2)
@@ -52,7 +61,12 @@ end
 end
 
 
-# dimensions for kernel launch: nx+2, ny+2
+
+"""
+compute the residual of Stokes momentum equation
+
+dimensions for kernel launch: nx+2, ny+2
+"""
 @kernel inbounds=true function compute_R!(R, P, τ, f, iΔx, iΔy)
     i, j = @index(Global, NTuple)
     ### residual in horizontal (x) direction
@@ -98,7 +112,13 @@ end
 end
 
 
-# dimensions for kernel launch: nx+2, ny+2
+"""
+update the search direction of the preconditioned CG method
+
+D = M⁻¹ R + β D
+
+dimensions for kernel launch: nx+2, ny+2
+"""
 @kernel inbounds=true function update_D!(D, R, invM, β)
     i, j = @index(Global, NTuple)
     if 1 < i < size(D.xc, 1) && j <= size(D.xc, 2)
@@ -119,7 +139,13 @@ end
 end
 
 
-# dimensions for kernel launch: nx+2, ny+2
+"""
+update the velocity using CG
+
+V = V + α D
+
+dimensions for kernel launch: nx+2, ny+2
+"""
 @kernel inbounds=true function update_V!(V, D, α)
     i, j = @index(Global, NTuple)
     if 1 < i < size(V.xc, 1) && j <= size(V.xc, 2)
@@ -140,7 +166,11 @@ end
 end
 
 
-# dimensions for kernel launch: nx+2, ny+2
+"""
+initialise an (approximate) diagonal preconditioner using fixed strain rates
+
+dimensions for kernel launch: nx+2, ny+2
+"""
 @kernel inbounds=true function initialise_invM_from_strain(invM, ϵ̇_E, B, q, iΔx, iΔy, γ)
     i, j = @index(Global, NTuple)
 
@@ -236,7 +266,13 @@ end
 end
 
 
-# dimensions for kernel launch: nx+1, ny+1
+"""
+compute the second invariant of the strain rate tensor
+
+ϵ̇_E = 0.5 ϵ̇ : ϵ̇
+
+dimensions for kernel launch: nx+1, ny+1
+"""
 @kernel inbounds=true function compute_strain_rate!(ϵ̇_E, V, iΔx, iΔy, ϵ̇_bg)
     i, j = @index(Global, NTuple)
 
@@ -263,6 +299,11 @@ end
 end
 
 
+"""
+compute the CG-residual using the definition
+
+K = R - Q
+"""
 @kernel inbounds=true function compute_K!(K, R, Q)
     i, j = @index(Global, NTuple)
     if 1 < i < size(K.xc, 1) && j <= size(K.xc, 2)
@@ -282,6 +323,12 @@ end
     end
 end
 
+
+"""
+compute the CG-residual using the update relation
+
+K = K - α Q
+"""
 @kernel inbounds=true function update_K!(K, Q, α)
     i, j = @index(Global, NTuple)
     if 1 < i < size(K.xc, 1) && j <= size(K.xc, 2)
@@ -302,6 +349,11 @@ end
 end
 
 
+"""
+increment the velocity with given stepsize, storing the result in an additional array
+
+V̄ = V - λ dV
+"""
 @kernel inbounds=true function try_step_V!(V̄, V, dV, λ)
     i, j = @index(Global, NTuple)
     if 1 < i < size(V̄.xc, 1) && j <= size(V̄.xc, 2)
@@ -323,6 +375,11 @@ end
 end
 
 
+"""
+initialise the search direction 
+
+D = M⁻¹ K
+"""
 @kernel inbounds=true function initialise_D!(D, K, invM)
     i, j = @index(Global, NTuple)
     if 1 < i < size(D.xc, 1) && j <= size(D.xc, 2)
@@ -343,6 +400,9 @@ end
 end
 
 
+"""
+assign values (this = other)
+"""
 @kernel inbounds=true function assign_flux_field!(this, other)
     i, j = @index(Global, NTuple)
     if i <= size(this.xc, 1) && j <= size(this.xc, 2)
@@ -364,7 +424,11 @@ end
 end
 
 
-# relies on the ordering of the components in V to be xc, yc, xv, yv
+"""
+Set one component ( xc, yc, xv, or yv) to a chequerboard pattern of ones and zeros
+
+Possible Caveat: relies on the ordering of the components in V̄ to be xc, yc, xv, yv
+"""
 @kernel inbounds=true function set_part_to_ones!(V̄, even, comp_idx)
     i, j = @index(Global, NTuple)
     set_this = (even && (i+j) % 2 == 0) || (!even && (i+j) % 2 == 1)
@@ -399,6 +463,9 @@ end
 end
 
 
+"""
+assign values (dest = src) for entries that have even [odd] index sum (i+j)
+"""
 @kernel inbounds=true function assign_part!(dest, src, even)
     i, j = @index(Global, NTuple)
     if i <= size(dest, 1) && j <= size(dest, 2)
@@ -409,6 +476,9 @@ end
 end
 
 
+"""
+apply element-wise inverse to M
+"""
 @kernel inbounds=true function invert!(M)
     i, j = @index(Global, NTuple)
     if i <= size(M.xc, 1) && j <= size(M.xc, 2)
@@ -428,7 +498,11 @@ end
 
 # ----- kernels with volume fractions -----
 
-# dimensions for kernel launch: nx+1, ny+1
+"""
+compute pressure and deviatoric stresses using volume fractions
+
+dimensions for kernel launch: nx+1, ny+1
+"""
 @kernel inbounds=true function compute_P_τ_weighted!(P, τ, P₀, V, B, q, ωₐ, ωₛ, ϵ̇_bg, iΔx, iΔy, γ)
     i, j = @index(Global, NTuple)
     if i <= size(P.c, 1) && j <= size(P.c, 2)
@@ -466,7 +540,11 @@ end
 end
 
 
-# dimensions for kernel launch: nx+2, ny+2
+"""
+compute the residual of Stokes momentum equation using volume fractions
+
+dimensions for kernel launch: nx+2, ny+2
+"""
 @kernel inbounds=true function compute_R_weighted!(R, P, τ, f, ωₐ, ωₛ, iΔx, iΔy)
     i, j = @index(Global, NTuple)
     ### residual in horizontal (x) direction
@@ -512,7 +590,9 @@ end
     # Residuals corresponding to cells affected by Dirichlet BC are left zero
 end
 
-
+"""
+compute velocity divergence using volume fractions
+"""
 @kernel inbounds=true function compute_divV_weighted!(divV, V, ωₐ, ωₛ, iΔx, iΔy)
     i, j = @index(Global, NTuple)
     
@@ -530,6 +610,9 @@ end
 end
 
 
+"""
+create volume fractions for a ring segment with a solid below and air on top
+"""
 @views function initialise_volume_fractions_ring_segment!(ωₐ, ωₛ,  x₀, y₀, rₐ, rₛ, xc, yc, xv, yv)
     copyto!(ωₐ.c[2:end-1, 2:end-1], [(x - x₀)^2 + (y - y₀)^2 < rₐ^2 ? 1. : 0. for x=xc, y=yc])
     ωₐ.c[[1, end], :] .= ωₐ.c[[2, end-1], :]
@@ -555,6 +638,10 @@ end
     return nothing
 end
 
+
+"""
+create volume fractions based on a function describing the interface
+"""
 @views function initialise_volume_fractions_from_function!(ω, fun, xc, yc, xv, yv, v_below, v_above)
     copyto!(ω.c[2:end-1, 2:end-1], [y <= fun(x) ? v_below : v_above for x=xc, y=yc])
     ω.c[[1, end], :] .= ω.c[[2, end-1], :]
@@ -568,6 +655,10 @@ end
     ω.yv[:, [1, end]] .= ω.yv[:, [2, end-1]]
 end
 
+
+"""
+initialise forcing due to gravity for a set of circular inclusions with fixed density  
+"""
 @views function initialise_f_inclusions!(f, xi, yi, ri, ρgi, ρg_b, xc, yc, xv, yv)
     fill!(f.xc, 0)
     fill!(f.xv, 0)  
